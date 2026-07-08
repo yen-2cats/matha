@@ -666,7 +666,7 @@ function renderDrillMenu() {
     const hist = S.drills[k] || [];
     const last = hist[hist.length - 1];
     const stat = last
-      ? `上次：中位數 ${(last.med / 1000).toFixed(1)}s／答對 ${last.acc}%${last.med / 1000 <= d.target ? ' ✅' : ''}`
+      ? `上次：中位數 ${(last.med / 1000).toFixed(1)}s／答對 ${last.acc}%${last.med / 1000 <= d.target && last.acc === 100 ? ' ✅' : ''}`
       : '尚未練過';
     return `<div class="card drill-card">
       <b>${d.name}</b><span class="dim"> 目標 ${d.target}s/題</span>
@@ -718,13 +718,13 @@ function drillNext() {
 function drillSubmit(optIdx) {
   const it = drill.items[drill.i];
   const ms = Date.now() - drill.t0;
-  let ok;
-  if (it.kind === 'num') ok = checkFill($('#din').value, [it.ans]);
-  else ok = optIdx === it.ans;
-  drill.results.push({ ok, ms });
+  let ok, given;
+  if (it.kind === 'num') { given = $('#din').value; ok = checkFill(given, [it.ans]); }
+  else { given = it.opts[optIdx]; ok = optIdx === it.ans; }
+  const ansTxt = it.kind === 'num' ? it.ans : it.opts[it.ans];
+  drill.results.push({ ok, ms, q: it.q, ans: ansTxt, given });
   stopTicker();
   const fb = $('#dfb');
-  const ansTxt = it.kind === 'num' ? it.ans : it.opts[it.ans];
   if (ok) {
     fb.innerHTML = `<p class="ok">✔ 正確（${(ms / 1000).toFixed(1)}s）</p>`;
     drill.i++;
@@ -744,14 +744,55 @@ function drillDone() {
   save();
   const hist = S.drills[drill.key];
   const prev = hist.length > 1 ? hist[hist.length - 2] : null;
-  const delta = prev ? ((med - prev.med) / 1000).toFixed(1) : null;
-  const pass = med / 1000 <= d.target && acc === 100;
+  const speedOK = med / 1000 <= d.target;
+  const accOK = acc === 100;
+  const pass = speedOK && accOK;
+  const totalMs = times.reduce((a, b) => a + b, 0);
+  const fastest = Math.min(...times);
+  const slowest = Math.max(...times);
+  const wrongs = drill.results.filter((r) => !r.ok);
+  const slows = drill.results.filter((r) => r.ok && r.ms > med * 2 && r.ms > 3000);
+  const slowShare = Math.round(100 * slows.reduce((a, r) => a + r.ms, 0) / totalMs);
+  // 診斷：分開判速度與準度，處方對症
+  let verdict;
+  if (pass) {
+    verdict = `✅ <b>達標！</b>速度（${(med / 1000).toFixed(1)}s ≤ ${d.target}s）與準度（100%）雙過——這個動作接近自動化了。明天再過一輪確認穩定，就換下一種特訓。`;
+  } else if (!accOK && speedOK) {
+    verdict = `⚠️ <b>敗在準度，不是速度。</b>中位數 ${(med / 1000).toFixed(1)}s 遠低於目標 ${d.target}s，但答對率只有 ${acc}%——手比腦快了。
+      <b>處方：下一輪刻意放慢兩成、每題送出前多看一眼，先拿 100% 再談快。</b>
+      自動化的定義是「快、而且不會錯」——考場上錯一題的代價，比慢三秒大得多。`;
+  } else if (accOK && !speedOK) {
+    verdict = `⚠️ <b>全對，但還不夠快</b>（${(med / 1000).toFixed(1)}s > 目標 ${d.target}s）——代表這個運算你還在「想」，還沒變成反射。
+      <b>處方：明天同一種再來一輪。</b>速度是重複出來的，不是想出來的。`;
+  } else {
+    verdict = `❌ 速度與準度都未達標。<b>處方：先不追速度——下一輪只求全對。</b>全對之後，速度通常會自己掉下來。`;
+  }
+  const trend = hist.slice(-6).map((h) => `${(h.med / 1000).toFixed(1)}s/${h.acc}%`).join(' → ');
+  const rows = drill.results.map((r, i) => {
+    const slow = r.ok && r.ms > med * 2 && r.ms > 3000;
+    return `<tr>
+      <td>${i + 1}</td><td>${r.q}</td>
+      <td>${r.ok ? '<span class="okc">✔</span>' : `<span class="badc">✘ ${r.given || '（空白）'}</span>`}</td>
+      <td><b>${r.ans}</b></td>
+      <td class="${slow ? 'warnc' : ''}" style="font-variant-numeric:tabular-nums">${(r.ms / 1000).toFixed(1)}s${slow ? ' ⚠' : ''}</td></tr>`;
+  }).join('');
   app().innerHTML = `
     <h1>${d.name} — 結果</h1>
     <div class="card ${pass ? 'good' : ''}">
-      <p class="big">中位數 <b>${(med / 1000).toFixed(1)}s</b>／目標 ${d.target}s ｜ 答對 <b>${acc}%</b></p>
-      ${prev ? `<p class="dim">與上次相比：${delta > 0 ? '+' : ''}${delta}s</p>` : ''}
-      <p>${pass ? '✅ 達標！這個動作已接近自動化，換下一種特訓。' : '未達標——同一種特訓明天再來一輪，速度是練出來的不是想出來的。'}</p>
+      <p class="big">中位數 <b>${(med / 1000).toFixed(1)}s</b>／目標 ${d.target}s ｜ 答對 <b class="${accOK ? 'okc' : 'badc'}">${acc}%</b></p>
+      <p class="dim">全輪 ${(totalMs / 1000).toFixed(0)}s ｜ 最快 ${(fastest / 1000).toFixed(1)}s ｜ 最慢 ${(slowest / 1000).toFixed(1)}s</p>
+      <p>${verdict}</p>
+      ${prev ? `<p class="dim">上一輪 ${(prev.med / 1000).toFixed(1)}s／${prev.acc}% → 這一輪 ${(med / 1000).toFixed(1)}s／${acc}%
+        ${med < prev.med && acc >= prev.acc ? '<span class="okc">（雙向進步 ↑）</span>' : ''}</p>` : ''}
+      ${hist.length > 1 ? `<p class="dim">近 ${Math.min(6, hist.length)} 輪走勢：${trend}</p>` : ''}
+    </div>
+    ${wrongs.length ? `<div class="card warn"><h2>✘ 錯的 ${wrongs.length} 題——花 30 秒看懂它們再走</h2>
+      <ul>${wrongs.map((r) => `<li>${r.q}　你答 <span class="badc">${r.given || '（空白）'}</span>，正解 <b>${r.ans}</b>（${(r.ms / 1000).toFixed(1)}s${r.ms < med ? '——比你的中位數還快，十之八九是搶快' : ''}）</li>`).join('')}</ul></div>` : ''}
+    ${slows.length ? `<div class="card"><h2>⚠ 卡頓題 ${slows.length} 題（吃掉全輪 ${slowShare}% 的時間）</h2>
+      <p class="dim">耗時超過自己中位數兩倍的題——這幾種數字組合就是你「還沒自動化」的精確位置，下一輪特別注意它們有沒有變快：</p>
+      <ul>${slows.map((r) => `<li>${r.q}　<b class="warnc">${(r.ms / 1000).toFixed(1)}s</b></li>`).join('')}</ul></div>` : ''}
+    <div class="card"><h2>逐題明細</h2>
+      <div style="overflow-x:auto"><table class="tbl"><tr><th>#</th><th>題目</th><th>作答</th><th>正解</th><th>耗時</th></tr>${rows}</table></div>
       <button class="btn primary" onclick="startDrill('${drill.key}')">再來一輪</button>
       <button class="btn" onclick="nav('drill')">回特訓選單</button>
     </div>`;
