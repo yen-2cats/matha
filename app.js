@@ -677,7 +677,7 @@ function renderDrillMenu() {
   }).join('');
   app().innerHTML = `
     <h1>⚡ 速度特訓</h1>
-    <p>目的：把基本運算練到<b>不經思考</b>。每輪 12 題，中位數時間達標（且全對）代表這個動作自動化了。<br>
+    <p>目的：把基本運算練到<b>不經思考</b>。每輪 12 題。<b>達標＝中位數 ≤ 目標秒數，且 12 題全對</b>——兩個條件缺一不可，「快但會錯」在考場上比「慢」更貴。<br>
     <span class="dim">建議當作每天開始讀數學的 10 分鐘暖身，選 2 種輪流。</span></p>
     <div class="grid">${cards}</div>`;
 }
@@ -780,6 +780,9 @@ function drillDone() {
     <h1>${d.name} — 結果</h1>
     <div class="card ${pass ? 'good' : ''}">
       <p class="big">中位數 <b>${(med / 1000).toFixed(1)}s</b>／目標 ${d.target}s ｜ 答對 <b class="${accOK ? 'okc' : 'badc'}">${acc}%</b></p>
+      <p>達標＝兩個條件同時成立：
+        ① 中位數 ≤ ${d.target}s ${speedOK ? '<b class="okc">✓ 已達</b>' : `<b class="badc">✗ 未達（你 ${(med / 1000).toFixed(1)}s）</b>`}
+        ② 12 題全對 ${accOK ? '<b class="okc">✓ 已達</b>' : `<b class="badc">✗ 未達（你 ${acc}%，錯 ${wrongs.length} 題）</b>`}</p>
       <p class="dim">全輪 ${(totalMs / 1000).toFixed(0)}s ｜ 最快 ${(fastest / 1000).toFixed(1)}s ｜ 最慢 ${(slowest / 1000).toFixed(1)}s</p>
       <p>${verdict}</p>
       ${prev ? `<p class="dim">上一輪 ${(prev.med / 1000).toFixed(1)}s／${prev.acc}% → 這一輪 ${(med / 1000).toFixed(1)}s／${acc}%
