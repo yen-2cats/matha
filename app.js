@@ -658,6 +658,93 @@ const DRILLS = {
       const a = rint(11, 25);
       return { q: `${a}² = ?`, kind: 'num', ans: String(a * a) };
     } },
+  quadroot: { name: '解一元二次', desc: '十字交乘直接報兩根——全卷最高頻的機械步驟（近5年約10題用到）', target: 20,
+    gen() {
+      const eq = (b, c) => `x²${b ? (b > 0 ? ` + ${b}x` : ` − ${-b}x`) : ''}${c ? (c > 0 ? ` + ${c}` : ` − ${-c}`) : ''} = 0`;
+      if (Math.random() < 0.2) {
+        const r = rint(-6, 6) || 3;
+        return { q: `${eq(-2 * r, r * r)}，重根 x = ?`, kind: 'num', ans: String(r) };
+      }
+      let p = rint(-9, 9) || 2;
+      let q2 = rint(-9, 9) || -3;
+      if (p === q2) q2 = p + rint(1, 4);
+      const lo = Math.min(p, q2), hi = Math.max(p, q2);
+      return { q: `${eq(-(p + q2), p * q2)}，兩根 = ?（由小到大，逗號分隔，如 -1,5）`, kind: 'num', ans: `${lo},${hi}` };
+    } },
+  frac: { name: '分數四則', desc: '機率、期望值的隱形時間殺手兼粗心大戶——答案一律最簡分數', target: 15,
+    gen() {
+      const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+      const red = (p, q) => {
+        if (q < 0) { p = -p; q = -q; }
+        const d = gcd(Math.abs(p), q) || 1;
+        p /= d; q /= d;
+        return q === 1 ? String(p) : `${p}/${q}`;
+      };
+      const t = rint(1, 4);
+      const a = rint(1, 9), b = rint(2, 9), c = rint(1, 9), d = rint(2, 9);
+      if (t === 1) {
+        const plus = Math.random() < 0.5;
+        return { q: `${a}/${b} ${plus ? '+' : '−'} ${c}/${d} = ?（最簡分數）`, kind: 'num', ans: red(plus ? a * d + c * b : a * d - c * b, b * d) };
+      }
+      if (t === 2) return { q: `${a}/${b} × ${c}/${d} = ?（最簡分數）`, kind: 'num', ans: red(a * c, b * d) };
+      if (t === 3) return { q: `(${a}/${b}) ÷ (${c}/${d}) = ?（最簡分數）`, kind: 'num', ans: red(a * d, b * c) };
+      const k = rint(2, 6), p = rint(2, 9), q2 = rint(p + 1, 12);
+      return { q: `約分到最簡：${p * k}/${q2 * k} = ?`, kind: 'num', ans: red(p, q2) };
+    } },
+  root: { name: '根式化簡', desc: '√48 要一眼變 4√3——所有距離、長度計算的收尾動作', target: 12,
+    gen() {
+      const t = rint(1, 3);
+      if (t === 1) {
+        const k = rint(2, 9), m = pick([2, 3, 5, 6, 7, 10]);
+        const right = `${k}√${m}`;
+        const opts = shuffle([right, `${k + 1}√${m}`, `${k}√${m === 10 ? 5 : m + (m === 3 ? 2 : 1)}`, `${k * 2}√${m}`]);
+        return { q: `化簡：√${k * k * m} = ?`, opts, ans: opts.indexOf(right) };
+      }
+      if (t === 2) {
+        const b = pick([2, 3, 5]), tt = rint(1, 4);
+        const right = tt === 1 ? `√${b}` : `${tt}√${b}`;
+        const cand = [right, `${tt}/√${b}`, `${tt * b}√${b}`, `${tt + 1}√${b}`, `${tt + 2}√${b}`, `${tt * b}/√${b}`];
+        const opts = shuffle([...new Set(cand)].slice(0, 4));
+        return { q: `有理化：${tt * b}/√${b} = ?`, opts, ans: opts.indexOf(right) };
+      }
+      // 距離計算收尾：√(x²+y²)
+      const cases = [
+        [6, 2, '2√10', ['4√10', '2√5', '√38']],
+        [4, 2, '2√5', ['4√5', '2√10', '√18']],
+        [6, 3, '3√5', ['9√5', '3√10', '2√5']],
+        [5, 5, '5√2', ['2√5', '25√2', '5']],
+        [4, 4, '4√2', ['2√4', '8', '4']],
+        [8, 4, '4√5', ['2√5', '4√2', '8√5']],
+        [3, 4, '5', ['7', '√7', '5√2']],
+        [6, 8, '10', ['14', '2√7', '10√2']],
+        [5, 12, '13', ['17', '√17', '13√2']],
+        [9, 3, '3√10', ['9√3', '3√3', '27']],
+      ];
+      const [x, y, right, wrongs] = pick(cases);
+      const opts = shuffle([right, ...wrongs]);
+      return { q: `√(${x}² + ${y}²) = ?（距離計算的收尾）`, opts, ans: opts.indexOf(right) };
+    } },
+  mat2: { name: '2×2 矩陣速算', desc: 'det、面積、矩陣作用——112 起連三年必考的新主角', target: 18,
+    gen() {
+      const t = rint(1, 3);
+      for (let tries = 0; tries < 8; tries++) {
+        const a = rint(-6, 6), b = rint(-6, 6), c = rint(-6, 6), d = rint(-6, 6);
+        if (t === 1) return { q: `二階行列式：第一列 (${a}, ${b})、第二列 (${c}, ${d})，ad−bc = ?`, kind: 'num', ans: String(a * d - b * c) };
+        if (t === 2) {
+          const x1 = rint(-5, 5), y1 = rint(-5, 5), x2 = rint(-5, 5), y2 = rint(-5, 5);
+          if (x1 * y2 - x2 * y1 === 0) continue;
+          return { q: `向量 (${x1}, ${y1}) 與 (${x2}, ${y2}) 張出的平行四邊形面積 = ?`, kind: 'num', ans: String(Math.abs(x1 * y2 - x2 * y1)) };
+        }
+        const x = rint(-4, 4), y = rint(-4, 4);
+        if (!x && !y) continue;
+        const right = `(${a * x + b * y}, ${c * x + d * y})`;
+        const opts = [...new Set([right, `(${a * x + c * y}, ${b * x + d * y})`, `(${a * x - b * y}, ${c * x - d * y})`, `(${c * x + d * y}, ${a * x + b * y})`])];
+        if (opts.length < 4) continue;
+        const sh = shuffle(opts);
+        return { q: `矩陣 A：第一列 (${a}, ${b})、第二列 (${c}, ${d})。A 作用在向量 (${x}, ${y}) 的結果 = ?`, opts: sh, ans: sh.indexOf(right) };
+      }
+      return { q: `二階行列式：第一列 (2, 3)、第二列 (1, 4)，ad−bc = ?`, kind: 'num', ans: '5' };
+    } },
 };
 
 function renderDrillMenu() {
@@ -678,7 +765,7 @@ function renderDrillMenu() {
   app().innerHTML = `
     <h1>⚡ 速度特訓</h1>
     <p>目的：把基本運算練到<b>不經思考</b>。每輪 12 題。<b>達標＝中位數 ≤ 目標秒數，且 12 題全對</b>——兩個條件缺一不可，「快但會錯」在考場上比「慢」更貴。<br>
-    <span class="dim">建議當作每天開始讀數學的 10 分鐘暖身，選 2 種輪流。</span></p>
+    <span class="dim">建議當作每天開始讀數學的 10 分鐘暖身，挑 2~3 種輪流——優先「上次未達標」的和新上架的四種（解一元二次、分數四則、根式化簡、2×2 矩陣）。</span></p>
     <div class="grid">${cards}</div>`;
 }
 
