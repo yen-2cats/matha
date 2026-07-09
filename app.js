@@ -1998,6 +1998,7 @@ let syncTimer = null;
 function supaInit() {
   if (!window.supabase) { syncPill(); return; } // CDN 被擋（artifact 環境）→ 純本機模式
   supa = window.supabase.createClient(SUPA_URL, SUPA_KEY);
+  autoLoginFromHash();
   supa.auth.onAuthStateChange((ev, session) => {
     const was = syncState.user && syncState.user.id;
     syncState.user = session ? session.user : null;
@@ -2014,6 +2015,24 @@ function syncQueue() {
   if (!supa || !syncState.user) return;
   clearTimeout(syncTimer);
   syncTimer = setTimeout(syncPush, 4000);
+}
+/* 裝置配對連結（免打字登入）：網址帶 #pair=base64(email|密碼) 時自動登入一次，
+   成功後 session 永久存在該裝置（自動續期）——體感等同「認裝置」。
+   憑證只存在飼主自己書籤裡的連結；這裡先清掉網址再登入，不落地、不上雲。 */
+async function autoLoginFromHash() {
+  const m = location.hash.match(/#pair=([A-Za-z0-9+/=_-]+)/);
+  if (!m) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  try {
+    const raw = atob(m[1].replace(/-/g, '+').replace(/_/g, '/'));
+    const i = raw.indexOf('|');
+    if (i < 1) return;
+    const { data: s } = await supa.auth.getSession();
+    if (s && s.session) { syncState.msg = '這台裝置已配對過'; syncPill(); return; }
+    const { error } = await supa.auth.signInWithPassword({ email: raw.slice(0, i), password: raw.slice(i + 1) });
+    syncState.msg = error ? '配對連結登入失敗：' + error.message : '✅ 裝置配對完成，之後開頁自動同步';
+    syncPill();
+  } catch (e) {}
 }
 /* 同步狀態燈（常駐右上角）＋開始做題前的登入攔檢 */
 function syncPill() {
@@ -2134,7 +2153,12 @@ async function syncLogin(isSignup) {
   else syncState.msg = '登入成功，同步啟動';
   renderStats();
 }
-async function syncLogout() { await supa.auth.signOut(); syncState.msg = ''; renderStats(); }
+async function syncLogout() {
+  // scope:'local' = 只登出這台裝置——預設的 global 會把桌機/平板/手機全部一起踢掉
+  await supa.auth.signOut({ scope: 'local' });
+  syncState.msg = '';
+  renderStats();
+}
 function syncPushNow() { syncState.msg = '上傳中…'; renderStats(); syncPush().then(() => renderStats()); }
 function syncCard() {
   if (!supa) return `<div class="card"><h2>☁️ 雲端同步</h2>
