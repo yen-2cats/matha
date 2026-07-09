@@ -1774,6 +1774,11 @@ function renderPracConfig() {
     <p>每題帶碼表；到達「理想中該答完的時間點」會提醒一次（就一次，不疲勞轟炸）。答錯要選錯因——錯因數據決定你之後練什麼。</p>
     <div class="card">
       <h3>單元（預設全選）</h3>
+      <div class="actr" style="justify-content:flex-end">
+        <button class="btn sm" onclick="pracSel('none')">全不選</button>
+        <button class="btn sm" onclick="pracSel('all')">全選</button>
+        <button class="btn sm" onclick="pracSel('weak')">🎯 選最近弱項</button>
+      </div>
       <div class="chips" id="topicChips">${chips}</div>
       <h3>難度</h3>
       <div class="chips" id="diffChips">
@@ -1789,6 +1794,27 @@ function renderPracConfig() {
       </div>
       <div class="actr"><button class="btn primary" onclick="startPrac()">開始（未做過的題優先）</button></div>
     </div>`;
+}
+/* 單元快速選取：全選／全不選／選最近表現弱的（近14天答對率<80% 或 耗時比>1.2；資料太少退回全期） */
+function pracSel(mode) {
+  const boxes = [...document.querySelectorAll('#topicChips input')];
+  if (mode === 'all') { boxes.forEach((b) => (b.checked = true)); return; }
+  if (mode === 'none') { boxes.forEach((b) => (b.checked = false)); return; }
+  const cut = Date.now() - 14 * 86400000;
+  let atts = S.attempts.filter((a) => (a.ts || 0) >= cut);
+  if (atts.length < 20) atts = S.attempts;
+  const by = {};
+  for (const a of atts) {
+    const q = bankById(a.qid); if (!q) continue;
+    const t = (by[q.topic] = by[q.topic] || { n: 0, ok: 0, ms: 0, target: 0 });
+    t.n++; t.ok += a.ok ? 1 : 0; t.ms += a.ms || 0; t.target += qTarget(q);
+  }
+  const weak = new Set(Object.keys(by).filter((k) => {
+    const t = by[k];
+    return t.n >= 2 && (t.ok / t.n < 0.8 || (t.target > 0 && t.ms / t.target > 1.2));
+  }));
+  if (!weak.size) { alert('最近的數據裡還看不出明顯弱項（或做題數太少）——先全選刷一輪，累積數據後這顆按鈕就會準了。'); return; }
+  boxes.forEach((b) => (b.checked = weak.has(b.value)));
 }
 let prac = null;
 function startPrac() {
