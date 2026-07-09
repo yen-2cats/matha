@@ -101,11 +101,14 @@ function inkToolsHTML() {
 }
 function inkHTML(opts) {
   const small = opts && opts.small;
+  const phone = opts && opts.phone;
   return `<div class="card ink-card">
-    <div class="ink-bar"><b>✍️ 計算區</b>${inkToolsHTML()}</div>
+    <div class="ink-bar"><b>${phone ? '✍️ 筆記區' : '✍️ 計算區'}</b>${inkToolsHTML()}</div>
     <div id="ink-flash" class="ink-flash" style="display:none"></div>
-    <div class="ink-scroll"><canvas id="ink-cv" data-h="${small ? 240 : 0}"></canvas></div>
-    <p class="dim ink-hint">觸控筆書寫（手掌不會誤觸）、兩指上下捲動；寫錯就劃掉或按復原。<b>最終答案寫在計算的最後（圈起來更好認）</b>——AI 會看完整過程、從結尾認答案。</p>
+    <div class="ink-scroll"><canvas id="ink-cv" data-h="${phone ? 170 : small ? 240 : 0}"></canvas></div>
+    <p class="dim ink-hint">${phone
+      ? '需要動筆記個中間數字就寫這裡（不批改）——作答仍用上面的按鈕。'
+      : '觸控筆書寫（手掌不會誤觸）、兩指上下捲動；寫錯就劃掉或按復原。<b>最終答案寫在計算的最後（圈起來更好認）</b>——AI 會看完整過程、從結尾認答案。'}</p>
   </div>`;
 }
 function inkSurface(key, cv, h) {
@@ -624,13 +627,18 @@ function aiFeedbackHTML(v) {
 /* ═══════════ 🧑‍🏫 老師方法庫（1662 條，Supabase teacher_methods 表） ═══════════
    概念洞 UI：答錯看詳解時、或錯題本頁，一鍵調出該單元老師的所有方法與口訣。
    雲端載一次後快取到本機（localStorage），之後離線也能看。 */
-let METHODLIB = null;
+let METHODLIB = null, MLIB_ERR = null;
 const MLIB_LS = 'mathA13_mlib_v1';
 async function loadMethodLib() {
   if (METHODLIB) return METHODLIB;
+  MLIB_ERR = null;
   try {
     const c = localStorage.getItem(MLIB_LS);
-    if (c) { METHODLIB = JSON.parse(c); return METHODLIB; }
+    if (c) {
+      const p = JSON.parse(c);
+      if (p && typeof p === 'object' && Object.keys(p).length) { METHODLIB = p; return p; }
+      localStorage.removeItem(MLIB_LS); // 壞快取（空物件/null）直接清掉，改抓雲端
+    }
   } catch (e) {}
   if (!supa || !syncState.user) return null;
   try {
@@ -639,7 +647,8 @@ async function loadMethodLib() {
       const { data, error } = await supa.from('teacher_methods')
         .select('unit,lec,concept,method,mnemonic,black,ex')
         .order('id').range(page * 1000, page * 1000 + 999);
-      if (error || !data) break;
+      if (error) { MLIB_ERR = error.message || '查詢失敗'; break; }
+      if (!data || !data.length) break;
       rows.push(...data);
       if (data.length < 1000) break;
     }
@@ -649,12 +658,13 @@ async function loadMethodLib() {
     METHODLIB = lib;
     try { localStorage.setItem(MLIB_LS, JSON.stringify(lib)); } catch (e) {}
     return lib;
-  } catch (e) { return null; }
+  } catch (e) { MLIB_ERR = (e && e.message) || '連線失敗'; return null; }
 }
 function mlibEmptyMsg() {
   if (!supa) return '離線版無法載入方法庫——請用正式站 yen-2cats.github.io/matha13。';
   if (!syncState.user) return '登入雲端同步後，才能載入老師方法庫。';
-  return '方法庫資料還沒上雲（teacher_methods 表未建立或還沒灌資料）——跟接手的 Claude 說一聲就能補上。';
+  if (MLIB_ERR) return `雲端連線暫時失敗（${MLIB_ERR}）——通常是網路不穩，按重試就好。`;
+  return '這次查回來是空的——1662 條資料確定在雲端，多半是暫時性網路問題，按重試就好。';
 }
 function mlibCard() {
   return `<div class="card"><h2>🧑‍🏫 老師方法庫</h2>
@@ -669,7 +679,11 @@ async function showMethods(unit) {
   const lib = await loadMethodLib();
   const cur = $('#mlib-box');
   if (!cur) return; // 載入期間已換頁
-  if (!lib) { cur.innerHTML = `<p class="dim">${mlibEmptyMsg()}</p>`; return; }
+  if (!lib) {
+    cur.innerHTML = `<p class="dim">${mlibEmptyMsg()}</p>${supa && syncState.user
+      ? `<div class="actr"><button class="btn sm" onclick="showMethods('${unit}')">🔄 重試</button></div>` : ''}`;
+    return;
+  }
   const ms = lib[unit] || [];
   if (!ms.length) { cur.innerHTML = `<p class="dim">「${TOPICS[unit]}」沒有對應的老師方法（課程未涵蓋這單元）。</p>`; return; }
   cur.innerHTML = `<div class="mlib">
@@ -1052,6 +1066,7 @@ function exitFlow(view) {
     const d = Date.now() - pausedAt;
     if (sessionMode === 'mock' && mock) { mock.t0 += d; mock.tEnd += d; }
     else if (sessionMode === 'drill' && drill) drill.t0 += d;
+    else if (sessionMode === 'phone' && phone) phone.t0 += d;
     else if (qsess) qsess.t0 += d;
   };
   if (sessionMode === 'judging') {
@@ -1257,7 +1272,7 @@ const DRILLS = {
       return { q: `${eq(-(p + q2), p * q2)}，兩根 = ?（逗號分隔、順序不拘，如 5,-1）`, kind: 'num', ans: `${lo},${hi}` };
     } },
   frac: { name: '分數四則', desc: '機率、期望值的隱形時間殺手兼粗心大戶——答案一律最簡分數', target: 15,
-    gen() {
+    gen(easy) { // easy → 手機模式：分母壓小，確保純心算
       const gcd = (a, b) => (b ? gcd(b, a % b) : a);
       const red = (p, q) => {
         if (q < 0) { p = -p; q = -q; }
@@ -1266,14 +1281,15 @@ const DRILLS = {
         return q === 1 ? String(p) : `${p}/${q}`;
       };
       const t = rint(1, 4);
-      const a = rint(1, 9), b = rint(2, 9), c = rint(1, 9), d = rint(2, 9);
+      const cap = easy ? 6 : 9;
+      const a = rint(1, cap - 1), b = rint(2, cap), c = rint(1, cap - 1), d = rint(2, cap);
       if (t === 1) {
         const plus = Math.random() < 0.5;
         return { q: `${a}/${b} ${plus ? '+' : '−'} ${c}/${d} = ?（最簡分數）`, kind: 'num', ans: red(plus ? a * d + c * b : a * d - c * b, b * d) };
       }
       if (t === 2) return { q: `${a}/${b} × ${c}/${d} = ?（最簡分數）`, kind: 'num', ans: red(a * c, b * d) };
       if (t === 3) return { q: `(${a}/${b}) ÷ (${c}/${d}) = ?（最簡分數）`, kind: 'num', ans: red(a * d, b * c) };
-      const k = rint(2, 6), p = rint(2, 9), q2 = rint(p + 1, 12);
+      const k = rint(2, easy ? 4 : 6), p = rint(2, easy ? 7 : 9), q2 = rint(p + 1, easy ? 9 : 12);
       return { q: `約分到最簡：${p * k}/${q2 * k} = ?`, kind: 'num', ans: red(p, q2) };
     } },
   root: { name: '根式化簡', desc: '√48 要一眼變 4√3——所有距離、長度計算的收尾動作', target: 12,
@@ -1310,11 +1326,11 @@ const DRILLS = {
       return { q: `√(${x}² + ${y}²) = ?（距離計算的收尾）`, opts, ans: opts.indexOf(right) };
     } },
   mat2: { name: '2×2 矩陣速算', desc: 'det、面積、矩陣作用——112 起連三年必考的新主角', target: 18,
-    gen() {
-      const t = rint(1, 3);
+    gen(maxT) { // maxT=2 → 手機模式只出 det/面積（矩陣作用心算負荷太重）
+      const t = rint(1, maxT || 3);
       for (let tries = 0; tries < 8; tries++) {
         const a = rint(-6, 6), b = rint(-6, 6), c = rint(-6, 6), d = rint(-6, 6);
-        if (t === 1) return { q: `二階行列式：第一列 (${a}, ${b})、第二列 (${c}, ${d})，ad−bc = ?`, kind: 'num', ans: String(a * d - b * c) };
+        if (t === 1) return { q: `二階行列式 ${m2H(a, b, c, d, 1)} = ?`, kind: 'num', ans: String(a * d - b * c) };
         if (t === 2) {
           const x1 = rint(-5, 5), y1 = rint(-5, 5), x2 = rint(-5, 5), y2 = rint(-5, 5);
           if (x1 * y2 - x2 * y1 === 0) continue;
@@ -1326,11 +1342,15 @@ const DRILLS = {
         const opts = [...new Set([right, `(${a * x + c * y}, ${b * x + d * y})`, `(${a * x - b * y}, ${c * x - d * y})`, `(${c * x + d * y}, ${a * x + b * y})`])];
         if (opts.length < 4) continue;
         const sh = shuffle(opts);
-        return { q: `矩陣 A：第一列 (${a}, ${b})、第二列 (${c}, ${d})。A 作用在向量 (${x}, ${y}) 的結果 = ?`, opts: sh, ans: sh.indexOf(right) };
+        return { q: `矩陣 A = ${m2H(a, b, c, d)}，A 作用在向量 (${x}, ${y}) 的結果 = ?`, opts: sh, ans: sh.indexOf(right) };
       }
-      return { q: `二階行列式：第一列 (2, 3)、第二列 (1, 4)，ad−bc = ?`, kind: 'num', ans: '5' };
+      return { q: `二階行列式 ${m2H(2, 3, 1, 4, 1)} = ?`, kind: 'num', ans: '5' };
     } },
 };
+/* 2×2 直式呈現：det=true 用行列式直線，否則用矩陣方括號（CSS .m2 畫框） */
+function m2H(a, b, c, d, det) {
+  return `<span class="m2${det ? ' det' : ''}"><span>${a}</span><span>${b}</span><span>${c}</span><span>${d}</span></span>`;
+}
 
 /* ═══════════ 📱 手機專區 ═══════════
    零碎時間、單手、全按鈕作答（不手寫不打字）。內容＝學測數A該背/該心算的：
@@ -1452,7 +1472,7 @@ function renderPhone() {
   const hist = (S.phone && S.phone.hist || []).slice(-6);
   app().innerHTML = `
     <h1>📱 手機專區</h1>
-    <p class="dim">通勤、排隊、零碎時間用：全程<b>按鈕作答</b>——不手寫、不打字、單手就能練。
+    <p class="dim">通勤、排隊、零碎時間用：<b>按鈕作答</b>、單手就能練；心算快答附一小塊筆記區，需要隨手記個數字可以寫（不批改）。
     內容鎖定學測數A「該背得出來、該心算得出來」的公式、定理、幾何原則、特殊值，以及老師 42 堂課強調要背的口訣。紀錄一樣自動上雲。</p>
     <div class="grid">
       <div class="card drill-card"><b>⚡ 心算快答</b>
@@ -1473,11 +1493,12 @@ let phone = null;
 function startPhoneQuiz() {
   if (!syncGate()) return;
   phone = { mode: 'quiz', items: [], i: 0, ok: 0, t0: 0, results: [], tapped: false };
-  const keys = ['tri', 'logexp', 'quad', 'rem', 'cnk', 'dot', 'seqd', 'mul', 'root', 'mat2', 'frac'];
+  // 手機＝純心算：排除餘式定理（f(k) 三項相加太重）；mat2 只出 det/面積；frac 壓小分母
+  const keys = ['tri', 'logexp', 'quad', 'cnk', 'dot', 'seqd', 'mul', 'root', 'mat2', 'frac'];
   let guard = 0;
   while (phone.items.length < 12 && guard++ < 100) {
     const k = pick(keys);
-    const o = optionize(DRILLS[k].gen());
+    const o = optionize(k === 'mat2' ? DRILLS.mat2.gen(2) : k === 'frac' ? DRILLS.frac.gen(1) : DRILLS[k].gen());
     if (o) { o.src = DRILLS[k].name; phone.items.push(o); }
   }
   sessionActive = true;
@@ -1497,8 +1518,10 @@ function phoneQuizNext() {
     <div class="card qcard"><div class="qtext big">${it.q}</div>
       <div class="pbtns">${it.opts.map((o, i) => `<button class="btn pbtn" onclick="phoneTap(${i})">${o}</button>`).join('')}</div>
       <div id="pfb"></div></div>
-    <p class="dim" style="text-align:center">${it.src}｜全按鈕作答</p>`;
+    ${inkHTML({ phone: true })}
+    <p class="dim" style="text-align:center">${it.src}｜按鈕作答，筆記區只是隨手算</p>`;
   sessionChrome(true);
+  inkStart(`phone-q${phone.i + 1}`, phone.t0);
   startTicker(() => { const t = $('#ptimer'); if (t) t.textContent = ((Date.now() - phone.t0) / 1000).toFixed(1) + 's'; });
 }
 function phoneTap(idx) {
@@ -1508,6 +1531,8 @@ function phoneTap(idx) {
   const it = phone.items[phone.i];
   const ms = Date.now() - phone.t0;
   const ok = idx === it.ans;
+  const proc = inkStop(); // 筆記區不批改，但有寫就留數據
+  if (proc && proc.n) syncInk(`phone-q${phone.i + 1}`, phone.t0, Object.assign({ mode: 'phone', ok }, proc));
   phone.results.push({ ok, ms });
   if (ok) phone.ok++;
   phoneLog(ok, ms);

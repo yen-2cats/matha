@@ -224,6 +224,13 @@ label.opt.block input { margin-right: 8px; accent-color: var(--accent); }
 .btn.pbtn { font-size: 18px; padding: 16px 8px; margin: 0; font-variant-numeric: tabular-nums; }
 .btn.pbtn.good { border-color: var(--ok); color: var(--ok); font-weight: 700; background: rgba(21, 128, 61, 0.06); }
 .btn.pbtn.badpick { border-color: var(--bad); color: var(--bad); background: rgba(220, 38, 38, 0.06); }
+/* 2×2 行列式/矩陣直式呈現：.det 兩側直線、否則方括號 */
+.m2 { display: inline-grid; grid-template-columns: auto auto; gap: 0.05em 0.85em; padding: 0.12em 0.5em; margin: 0 0.2em; vertical-align: middle; text-align: center; position: relative; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.m2::before, .m2::after { content: ''; position: absolute; top: 0; bottom: 0; width: 0.3em; border: 2px solid currentColor; }
+.m2::before { left: 0; border-right: 0; }
+.m2::after { right: 0; border-left: 0; }
+.m2.det::before { width: 0; border-width: 0 0 0 2px; }
+.m2.det::after { width: 0; border-width: 0 2px 0 0; }
 .flashcard { min-height: 42vh; display: flex; flex-direction: column; justify-content: center; text-align: center; cursor: pointer; }
 .flash-front { font-size: 22px; font-weight: 700; margin: 8px 0; }
 .flash-backtxt { font-size: 19px; color: var(--accent); font-weight: 700; margin-top: 12px; white-space: pre-wrap; }
