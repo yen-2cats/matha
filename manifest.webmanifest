@@ -1,7 +1,7 @@
 {
-  "name": "數A 13級分特訓系統",
+  "name": "數A特訓",
   "short_name": "數A特訓",
-  "description": "學測數A 13級分特訓：速度特訓、手寫刷題、模擬實戰、手機專區",
+  "description": "學測數A特訓：速度特訓、手寫刷題、模擬實戰、手機專區",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",

@@ -115,8 +115,9 @@ label.opt.block input { margin-right: 8px; accent-color: var(--accent); }
 .timebar { height: 4px; background: var(--panel2); border-radius: 3px; overflow: hidden; margin-bottom: 6px; }
 .timebar-fill { height: 100%; width: 0; background: var(--accent); transition: width 0.25s linear; }
 
-.qcard { padding: 14px; }
+.qcard { padding: 14px; position: relative; }
 .qwrap { position: relative; }
+/* 整卡書寫層：蓋住題目＋選項＋按鈕（跟題本一樣整面能寫）；輕點會穿透到按鈕 */
 .qink { position: absolute; inset: 0; touch-action: none; cursor: crosshair; z-index: 2; }
 .qtext { font-size: 17px; margin-bottom: 12px; }
 .qfig { margin: 10px auto 4px; text-align: center; }
