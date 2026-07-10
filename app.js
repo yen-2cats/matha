@@ -130,29 +130,36 @@ function inkStart(qid, t0, since) {
   const cut = since != null ? since : t0;
   for (const arr of [st.s, st.q, st.a]) for (const s of arr) if (!s.dead && !s.arch && s.t0 < cut) s.arch = 1;
   if (st.m) for (const m of st.m) if (!m.arch && m.t < cut) m.arch = 1; // 舊批改標記一起歸檔
+  let maxY = 0;
+  for (const s of st.s) if (!s.dead && !s.arch) for (const p of s.pts) if (p[1] > maxY) maxY = p[1];
+  const base = +cv.dataset.h || 0;
+  const h = base
+    ? Math.max(base, Math.ceil(maxY + 80))
+    : Math.max(340, Math.round(window.innerHeight * 0.45), Math.ceil(maxY + 80));
   ink = { qid, t0, penAt: 0, sur: {} };
-  ink.sur.calc = inkSurface('calc', cv, 0);
-  const sheet = cv.closest('.sheet');
-  if (sheet) {
-    // 整頁書寫紙：先確保夠高容納舊筆跡（回頭作答時），再隨內容變高自動跟上
-    let maxY = 0;
-    for (const s of st.s) if (!s.dead && !s.arch) for (const p of s.pts) if (p[1] > maxY) maxY = p[1];
-    if (maxY + 160 > sheet.clientHeight) sheet.style.minHeight = (maxY + 300) + 'px';
-    if (window.ResizeObserver) {
-      ink.ro = new ResizeObserver(() => { if (ink && ink.sur.calc) inkSizeSur(ink.sur.calc); });
-      ink.ro.observe(sheet);
+  ink.sur.calc = inkSurface('calc', cv, h);
+  const qcv = $('#qink-cv');
+  if (qcv) {
+    ink.sur.q = inkSurface('q', qcv, 0);
+    if (window.ResizeObserver) { // 題卡高度會隨作答內容變動（如展開打字欄）：畫布尺寸跟著走
+      ink.ro = new ResizeObserver(() => { if (ink && ink.sur.q) inkSizeSur(ink.sur.q); });
+      ink.ro.observe(qcv.parentElement);
     }
   }
-  inkSizeSur(ink.sur.calc);
+  const acv = $('#ans-cv');
+  if (acv) ink.sur.ans = inkSurface('ans', acv, 150);
+  for (const k of Object.keys(ink.sur)) inkSizeSur(ink.sur[k]);
   inkColorSet(inkColor);
 }
 function inkSizeSur(sur) {
   const dpr = window.devicePixelRatio || 1;
-  const cv = sur.cv;
-  const sheet = cv.closest('.sheet');
   let w, h;
-  if (sheet) { w = sheet.clientWidth; h = sheet.clientHeight; } // 整頁書寫紙：畫布蓋滿整張紙
-  else { const p = cv.parentElement; w = p.clientWidth; h = +cv.dataset.h || p.clientHeight || 200; } // 手機小筆記區
+  if (sur.key === 'q') {
+    const wrap = sur.cv.parentElement; // .qwrap（畫記層蓋在題目文字上）
+    w = wrap.clientWidth; h = wrap.clientHeight;
+  } else {
+    w = sur.cv.parentElement.clientWidth; h = sur.h;
+  }
   sur.cv.width = Math.max(1, Math.round(w * dpr));
   sur.cv.height = Math.max(1, Math.round(h * dpr));
   sur.cv.style.width = w + 'px'; sur.cv.style.height = h + 'px';
@@ -161,13 +168,6 @@ function inkSizeSur(sur) {
   inkRedraw(sur);
 }
 function inkExtend(dh) {
-  const cv = $('#ink-cv'); const sheet = cv && cv.closest('.sheet');
-  if (sheet) { // 整頁紙：加長＝把紙變高，多出空白繼續寫
-    const cur = sheet.getBoundingClientRect().height;
-    sheet.style.minHeight = Math.min(9000, cur + dh) + 'px';
-    if (ink && ink.sur.calc) inkSizeSur(ink.sur.calc);
-    return;
-  }
   if (!ink || !ink.sur.calc || ink.sur.calc.h >= 4000) return;
   ink.sur.calc.h = Math.min(4000, ink.sur.calc.h + dh);
   inkSizeSur(ink.sur.calc);
@@ -176,7 +176,7 @@ function inkColorSet(c) {
   inkColor = c;
   for (const k of ['k', 'r', 'g']) {
     const b = $('#ink-c-' + k);
-    if (b) b.classList.toggle('active', k === c); // 保留 rtool/btn 原有 class
+    if (b) b.className = 'btn sm inkc' + (k === c ? ' active' : '');
   }
 }
 function inkPos(e, sur) {
@@ -229,22 +229,22 @@ function inkMove(e, sur) {
   const c = sur.ctx;
   c.strokeStyle = INK_COLORS[sur.cur.c] || INK_COLORS.k; c.lineWidth = INK_W;
   c.beginPath(); c.moveTo(p[0], p[1]); c.lineTo(x, y); c.stroke();
-  if (sur.key === 'calc' && y > sur.cv.clientHeight - 60) inkExtend(500); // 寫到底自動加長
+  if (sur.key === 'calc' && y > sur.h - 48) inkExtend(320);
 }
 function inkUp(e, sur) {
   if (!ink) return;
   if (e.pointerType === 'touch') {
     const tp = sur.touches.get(e.pointerId);
     sur.touches.delete(e.pointerId);
-    // 單指快速輕點＝要按畫布底下的按鈕/選項（整頁書寫層需要點擊穿透）
-    if (tp && sur.touches.size === 0 && Date.now() - tp.t < 400
+    // 單指快速輕點＝要按畫布底下的按鈕（整卡書寫層需要點擊穿透）
+    if (tp && sur.key === 'q' && sur.touches.size === 0 && Date.now() - tp.t < 400
         && Math.abs(e.clientX - tp.x0) < 8 && Math.abs(e.clientY - tp.y0) < 8) inkClickThru(e, sur);
     return;
   }
   if (!sur.cur) return;
   const cur = sur.cur; sur.cur = null;
   if (cur.pts.length > 1) { cur.t1 = Date.now(); inkArr(sur).push(cur); }
-  else inkClickThru(e, sur); // 筆尖/滑鼠輕點＝按按鈕，不是畫點
+  else if (sur.key === 'q') inkClickThru(e, sur); // 筆尖/滑鼠輕點＝按按鈕，不是畫點
 }
 /* 點擊穿透：畫布蓋整張題卡後，輕點選項/按鈕/輸入欄要照常作用 */
 function inkClickThru(e, sur) {
@@ -359,9 +359,8 @@ function inkStop() {
   for (const k of Object.keys(ink.sur)) {
     const cv = ink.sur[k].cv;
     cv.onpointerdown = cv.onpointermove = cv.onpointerup = cv.onpointercancel = null;
-    cv.style.pointerEvents = 'none'; // 停止書寫後畫布不再攔截點擊（下一題按鈕在詳解區）
+    cv.style.pointerEvents = 'none'; // 停止書寫後畫布不再攔截點擊（批改按鈕在畫布下層）
   }
-  const rail = $('.tools-rail'); if (rail) rail.style.display = 'none'; // 作答結束收起工具條
   ink = null;
   const st = inkStore(qid);
   const now = Date.now();
@@ -406,12 +405,51 @@ function inkCapture(qid, key, asDataURL) {
   const url = cv.toDataURL('image/png');
   return asDataURL ? url : url.split(',')[1];
 }
-/* 整頁書寫紙＝單一書寫面，整張截圖給 AI */
-function inkCaptureFull(qid, asDataURL) { return inkCapture(qid, 's', asDataURL); }
-/* 批改標記畫在最後一筆所在處（整頁只有一個書寫面 's'） */
+/* 整卷截圖：題卡（題目上/周圍）筆跡在上、計算區在下，拼成一張給 AI——跟版面順序一致 */
+function inkCaptureFull(qid, asDataURL) {
+  const qUrl = inkCapture(qid, 'q', true), sUrl = inkCapture(qid, 's', true);
+  if (!qUrl && !sUrl) return null;
+  if (!qUrl || !sUrl) {
+    const one = qUrl || sUrl;
+    return asDataURL ? one : one.split(',')[1];
+  }
+  // 兩面都有：同步重畫兩面到一張畫布（不能用 <img> 非同步載入）
+  const draw = (key) => {
+    const st = sessionInk[qid];
+    const arr = ((key === 'q' ? st.q : st.s) || []).filter((s) => !s.dead && !s.arch);
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const s of arr) for (const p of s.pts) {
+      if (p[0] < x0) x0 = p[0]; if (p[1] < y0) y0 = p[1];
+      if (p[0] > x1) x1 = p[0]; if (p[1] > y1) y1 = p[1];
+    }
+    return { arr, x0, y0, w: x1 - x0 + 28, h: y1 - y0 + 28 };
+  };
+  const qd = draw('q'), sd = draw('s');
+  const w = Math.max(qd.w, sd.w), gap = 26;
+  const scale = Math.min(2, Math.max(0.4, 1100 / w));
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(w * scale));
+  cv.height = Math.max(1, Math.round((qd.h + gap + sd.h) * scale));
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.setTransform(scale, 0, 0, scale, (14 - qd.x0) * scale, (14 - qd.y0) * scale);
+  for (const s of qd.arr) inkDrawStroke(ctx, s, 2.2);
+  ctx.setTransform(scale, 0, 0, scale, (14 - sd.x0) * scale, (qd.h + gap + 14 - sd.y0) * scale);
+  for (const s of sd.arr) inkDrawStroke(ctx, s, 2.2);
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.strokeStyle = '#9ca3af'; ctx.lineWidth = 1; ctx.setLineDash([7, 7]);
+  ctx.beginPath(); ctx.moveTo(0, qd.h + gap / 2); ctx.lineTo(w, qd.h + gap / 2); ctx.stroke();
+  const url = cv.toDataURL('image/png');
+  return asDataURL ? url : url.split(',')[1];
+}
+/* 批改標記畫在「最後一筆」所在的那一面（答案通常寫在最後） */
 function inkMarkAuto(qid, ok, ansText) {
   const st = sessionInk[qid]; if (!st) return;
-  if ((st.s || []).some((s) => !s.dead && !s.arch)) inkMark(qid, 's', ok, ansText);
+  const lastOf = (arr) => (arr || []).filter((s) => !s.dead && !s.arch).reduce((a, b) => (!a || (b.t1 || b.t0) > (a.t1 || a.t0) ? b : a), null);
+  const lq = lastOf(st.q), ls = lastOf(st.s);
+  const sur = ls && (!lq || (ls.t1 || ls.t0) >= (lq.t1 || lq.t0)) ? 's' : lq ? 'q' : null;
+  if (sur) inkMark(qid, sur, ok, ansText);
 }
 function inkSummary(p) {
   if (!p) return '';
@@ -1960,25 +1998,24 @@ function drillNext() {
   drill.lock = false;
   drill.t0 = Date.now();
   drill.qid = `drill:${drill.key}:${drill.t0}`;
-  const body = it.kind === 'num'
-    ? `<details class="typed-opt"><summary class="dim">改用打字（選用）</summary>
+  const input = it.kind === 'num'
+    ? `<p class="dim">✍️ 答案寫在最後：</p>
+       <div class="actr"><button class="btn primary big" onclick="drillSubmit()">✅ 算完了</button></div>
+       <details class="typed-opt"><summary class="dim">改用打字（選用）</summary>
        <input id="din" class="ans-input" inputmode="text" autocomplete="off" placeholder="答案" onkeydown="if(event.key==='Enter')drillSubmit()"></details>`
-    : `<div class="bk-opts">${it.opts.map((o, idx) => `<div class="bk-opt" onclick="drillSubmit(${idx})"><span class="bk-op">(${idx + 1})</span><span>${mDispOpt(o)}</span></div>`).join('')}</div>`;
-  const railActions = it.kind === 'num' ? `<button class="rtool go" onclick="drillSubmit()">✅<span>算完了</span></button>` : '';
+    : it.opts.map((o, idx) => `<button class="btn opt" onclick="drillSubmit(${idx})">${mDispOpt(o)}</button>`).join('');
   app().innerHTML = `
     <div class="session-head">
       <span>${d.name}｜第 ${drill.i + 1} / 12 題</span>
       <span class="shr">${timerOn() ? '<span id="dtimer" class="timer">0.0s</span>' : ''}
       <button class="btn sm xbtn" onclick="exitFlow()" title="離開">✕</button></span>
     </div>
-    <div class="sheet" id="ink-sheet">
-      <div class="card qcard"><div class="qtext big">${rtTxt(it.q)}</div>
-        ${body}
-        <div id="dfb"></div>
-      </div>
-      <canvas id="ink-cv" class="sheet-ink"></canvas>
+    <div class="card qcard"><div class="qwrap"><div class="qtext big">${rtTxt(it.q)}</div></div>
+      <div class="ansrow">${input}</div>
+      <div id="dfb"></div>
+      <canvas id="qink-cv" class="qink"></canvas>
     </div>
-    ${toolsRail(railActions)}`;
+    ${inkHTML({ small: true })}`;
   sessionChrome(true);
   inkStart(drill.qid, drill.t0);
   if (timerOn()) startTicker(() => {
@@ -2276,44 +2313,31 @@ function bkOpts(q, submitFn) {
   }
   return '';
 }
-/* 右側固定直列工具條：主要動作（算完了/放棄）＋三色筆＋復原＋加長，隨手可按、不擋書寫 */
-function toolsRail(actions) {
-  return `<div class="tools-rail">
-    ${actions || ''}${actions ? '<div class="rsep"></div>' : ''}
-    <button class="rtool inkc" id="ink-c-k" onclick="inkColorSet('k')"><span class="dot" style="background:${INK_COLORS.k}"></span>黑</button>
-    <button class="rtool inkc" id="ink-c-r" onclick="inkColorSet('r')"><span class="dot" style="background:${INK_COLORS.r}"></span>紅</button>
-    <button class="rtool inkc" id="ink-c-g" onclick="inkColorSet('g')"><span class="dot" style="background:${INK_COLORS.g}"></span>綠</button>
-    <button class="rtool" onclick="inkUndo()">↩<span>復原</span></button>
-    <button class="rtool" onclick="inkExtend(600)">⬇<span>加長</span></button>
+/* 題本卡：段落標頭 + 題號 + 題幹 + 選項；bodyId 讓 canvas/回饋掛得上 */
+function bkCard(q, head, submitFn, actions) {
+  return `<div class="card qcard booklet">
+    <div class="bk-head"><span class="bk-exam">數學Ａ</span><span class="bk-sect">${sectionLabel(q)}</span></div>
+    <div class="bk-item"><span class="bk-num">${bkNum(head)}</span>
+      <div class="bk-content">${rtTxt(q.q)}${q.fig ? `<div class="qfig">${q.fig}</div>` : ''}${bkOpts(q, submitFn)}</div></div>
+    <div class="ansarea">${actions}</div>
+    <div id="qfb"></div>
+    <canvas id="qink-cv" class="qink"></canvas>
   </div>`;
-}
-/* 整頁書寫紙＝題本卡（題目＋選項）在上、下方全是空白計算區，一張畫布蓋滿整頁；動作在右側工具條 */
-function bkCard(q, head, submitFn, railActions, cardExtra) {
-  return `<div class="sheet" id="ink-sheet">
-    <div class="card qcard booklet">
-      <div class="bk-head"><span class="bk-exam">數學Ａ</span><span class="bk-sect">${sectionLabel(q)}</span></div>
-      <div class="bk-item"><span class="bk-num">${bkNum(head)}</span>
-        <div class="bk-content">${rtTxt(q.q)}${q.fig ? `<div class="qfig">${q.fig}</div>` : ''}${bkOpts(q, submitFn)}</div></div>
-      ${cardExtra || ''}
-      <div id="qfb"></div>
-    </div>
-    <canvas id="ink-cv" class="sheet-ink"></canvas>
-  </div>
-  ${toolsRail(railActions)}`;
 }
 let qsess = null;
 function renderQuestion(q, cfg) {
   qsess = { q, cfg, t0: Date.now(), warned: false, locked: false };
   const target = qTarget(q);
-  const giveUp = `<button class="rtool giveup" onclick="qGiveUp()">🏳<span>放棄</span></button>`;
-  let railActions, cardExtra = '';
+  const giveUp = `<button class="btn sm skip" onclick="qGiveUp()">🏳 放棄，看答案</button>`;
+  let actions;
   if (q.type === 'single') {
-    railActions = giveUp; // 點選項即作答
+    actions = `<div class="actr">${giveUp}</div>`; // 點選項即作答
   } else if (q.type === 'multi') {
-    railActions = `<button class="rtool go" onclick="qSubmit()">送出</button>${giveUp}`;
+    actions = `<div class="actr">${giveUp}<button class="btn primary" onclick="qSubmit()">送出（多選）</button></div>`;
   } else {
-    railActions = `<button class="rtool go" onclick="qSubmit()">✅<span>算完了</span></button>${giveUp}`;
-    cardExtra = `<details class="typed-opt"><summary class="dim">改用打字（選用）</summary>
+    actions = `<p class="dim">✍️ 整頁可寫，<b>答案寫在最後</b>：</p>
+      <div class="actr">${giveUp}<button class="btn primary big" onclick="qSubmit()">✅ 算完了，開始批改</button></div>
+      <details class="typed-opt"><summary class="dim">改用打字（選用）</summary>
       <input id="qin" class="ans-input" autocomplete="off" placeholder="輸入答案（分數用 a/b）" onkeydown="if(event.key==='Enter')qSubmit()"></details>`;
   }
   app().innerHTML = `
@@ -2324,7 +2348,8 @@ function renderQuestion(q, cfg) {
     </div>
     ${timerOn() ? '<div class="timebar"><div id="tbfill" class="timebar-fill"></div></div>' : ''}
     <div id="q-flash" class="ink-flash" style="display:none"></div>
-    ${bkCard(q, cfg.head, 'qSubmit', railActions, cardExtra)}`;
+    ${bkCard(q, cfg.head, 'qSubmit', actions)}
+    ${inkHTML()}`;
   sessionChrome(true);
   inkStart(q.id, qsess.t0);
   if (!timerOn()) return; // 計時器隱藏：不跑碼表、不出時間警示（時間仍在 qSubmit 幕後量測）
@@ -2526,18 +2551,19 @@ function mockQ() {
   mock.t0 = Date.now();
   mock.qwarned = false;
   mock.qlock = false;
-  const skip = mock.round === 1
-    ? `<button class="rtool" onclick="mockSkip()">⏭<span>跳過</span></button>`
-    : `<button class="rtool giveup" onclick="mockGiveup()">🏳<span>放棄</span></button>`;
-  let railActions, cardExtra = '';
+  const mockRow = `<div class="mock-actions">
+      ${mock.round === 1 ? `<button class="btn skip" onclick="mockSkip()">跳過 → 第二輪</button>` : `<button class="btn skip" onclick="mockGiveup()">放棄此題</button>`}
+      <span id="mqtimer" class="dim"></span></div>`;
+  let actions;
   if (q.type === 'single') {
-    railActions = skip; // 點選項即作答
+    actions = mockRow; // 點選項即作答
   } else if (q.type === 'multi') {
-    railActions = `<button class="rtool go" onclick="mockAns()">送出</button>${skip}`;
+    actions = `<div class="actr"><button class="btn primary" onclick="mockAns()">送出此題</button></div>${mockRow}`;
   } else {
-    railActions = `<button class="rtool go" onclick="mockAns()">✅<span>算完了</span></button>${skip}`;
-    cardExtra = `<details class="typed-opt"><summary class="dim">改用打字（選用）</summary>
-      <input id="qin" class="ans-input" autocomplete="off" placeholder="答案（分數用 a/b）" onkeydown="if(event.key==='Enter')mockAns()"></details>`;
+    actions = `<p class="dim">✍️ 整頁可寫，<b>答案寫在最後</b>：</p>
+      <div class="actr"><button class="btn primary big" onclick="mockAns()">✅ 算完了 → 下一題</button></div>
+      <details class="typed-opt"><summary class="dim">改用打字（選用）</summary>
+      <input id="qin" class="ans-input" autocomplete="off" placeholder="答案（分數用 a/b）" onkeydown="if(event.key==='Enter')mockAns()"></details>${mockRow}`;
   }
   app().innerHTML = `
     <div class="session-head">
@@ -2546,7 +2572,8 @@ function mockQ() {
       <button class="btn sm xbtn" onclick="exitFlow()" title="離開">✕</button></span>
     </div>
     <div id="q-flash" class="ink-flash" style="display:none"></div>
-    ${bkCard(q, '第 ' + (mock.i + 1) + ' 題', 'mockAns', railActions, cardExtra)}`;
+    ${bkCard(q, '第 ' + (mock.i + 1) + ' 題', 'mockAns', actions)}
+    ${inkHTML()}`;
   sessionChrome(true);
   inkStart(q.id, mock.t0, mock.sessT0); // 第二輪回頭時保留第一輪筆跡；更早的舊筆跡歸檔
   startTicker(() => {
