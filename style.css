@@ -136,8 +136,11 @@ label.opt.block input { margin-right: 8px; accent-color: var(--accent); }
 .bk-opt:has(:checked) .bk-op { color: var(--accent); }
 .qcard.booklet .ansarea { padding: 0 16px 14px; }
 .qcard.booklet #qfb { padding: 0 16px; }
-/* 整卡書寫層：蓋住題目＋選項＋按鈕（跟題本一樣整面能寫）；輕點會穿透到按鈕 */
+/* 整卡書寫層：蓋住題目讓你能在題目上/旁邊寫 */
 .qink { position: absolute; inset: 0; touch-action: none; cursor: crosshair; z-index: 2; }
+/* 但選項、動作按鈕、輸入欄、回饋疊到畫布上面，直接一次點到（不用靠穿透、不用點兩下）——刷題/模擬/速訓通用 */
+.qcard .bk-opts, .qcard .ansarea, .qcard .ansrow, .qcard #qfb, .qcard #dfb, .qcard .typed-opt {
+  position: relative; z-index: 3; touch-action: manipulation; }
 .qtext { font-size: 17px; margin-bottom: 12px; }
 .qfig { margin: 10px auto 4px; text-align: center; }
 .qfig svg { max-width: min(100%, 460px); height: auto; background: #fff; }
