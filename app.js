@@ -33,6 +33,7 @@ function applyExtBank() {
   for (const q of S.extbank) {
     if (!q || !q.id || have.has(q.id)) continue;
     if (q.needsFigure && !q.fig) continue; // 需要圖才能解、圖還沒補上的題不出（避免無圖硬解）
+    if (q.dup) continue; // 內容重複題（講義收錄的歷屆題等）：只出正主，不出分身
     BANK.push(q); have.add(q.id);
   }
 }
@@ -1006,7 +1007,7 @@ function startPracAuto() {
   let pool = worst.length ? BANK.filter((q) => worst.includes(q.topic)) : BANK.slice();
   if (pool.length < 8) pool = BANK.slice();
   pool = shuffle(pool).sort((a, b) => attemptsOf(a.id).length - attemptsOf(b.id).length);
-  prac = { queue: pool.slice(0, 8), i: 0, results: [], mode: 'practice' };
+  prac = { queue: dedupeStems(pool, 8), i: 0, results: [], mode: 'practice' };
   sessionActive = true;
   sessionMode = 'prac';
   snapSession();
@@ -1650,7 +1651,7 @@ function startPhoneQuiz() {
   let guard = 0;
   while (phone.items.length < 12 && guard++ < 100) {
     const k = pick(keys);
-    const o = optionize(k === 'mat2' ? DRILLS.mat2.gen(2) : k === 'frac' ? DRILLS.frac.gen(1) : DRILLS[k].gen());
+    const o = optionize(genFresh(k, () => (k === 'mat2' ? DRILLS.mat2.gen(2) : k === 'frac' ? DRILLS.frac.gen(1) : DRILLS[k].gen())));
     if (o) { o.src = DRILLS[k].name; phone.items.push(o); }
   }
   sessionActive = true;
@@ -1820,10 +1821,22 @@ function renderDrillMenu() {
 }
 
 let drill = null;
+/* 產生器去重：同一 session 內記住最近出過的題面，避免小題池一直撞同數字 */
+const QSEEN = {};
+function genFresh(key, genFn) {
+  const seen = (QSEEN[key] = QSEEN[key] || []);
+  let g = null;
+  for (let t = 0; t < 15; t++) {
+    g = genFn();
+    const sig = String(g.q).replace(/<[^>]+>/g, '').replace(/\s+/g, '');
+    if (!seen.includes(sig)) { seen.push(sig); if (seen.length > 40) seen.shift(); return g; }
+  }
+  return g; // 題池真的太小躲不掉時才接受重複
+}
 function startDrill(key) {
   if (!syncGate()) return;
   drill = { key, items: [], i: 0, results: [], t0: 0, pend: null };
-  for (let i = 0; i < 12; i++) drill.items.push(DRILLS[key].gen());
+  for (let i = 0; i < 12; i++) drill.items.push(genFresh(key, () => DRILLS[key].gen()));
   sessionActive = true;
   sessionMode = 'drill';
   drillNext();
@@ -1883,7 +1896,7 @@ function drillSubmit(optIdx) {
   };
   if (ms >= 360000) {
     modal(`<h2>⏸ 這題用了 ${fmtSec(ms)}</h2><p>是不是有中途離開座位？有的話這題不列入本輪，避免污染速度數據。</p>`, [
-      ['有離開，這題不列入', () => { drill.pend = null; drill.lock = false; drill.items[drill.i] = DRILLS[drill.key].gen(); drillNext(); }],
+      ['有離開，這題不列入', () => { drill.pend = null; drill.lock = false; drill.items[drill.i] = genFresh(drill.key, () => DRILLS[drill.key].gen()); drillNext(); }],
       ['沒有離開，正常記錄', proceed],
     ]);
   } else proceed();
@@ -1984,6 +1997,24 @@ function drillDone() {
 
 /* ═══════════ 主題刷題 ═══════════ */
 function attemptsOf(qid) { return S.attempts.filter((a) => a.qid === qid); }
+/* 一輪隊列裡同一題組的小題只取一題（共用題幹連著出會像「一直重複」）；不夠再補回 */
+function dedupeStems(list, cnt) {
+  const seen = new Set(), out = [];
+  for (const q of list) {
+    const isGroup = String(q.q).includes('題為題組');
+    const k = isGroup ? (q.src || '') + '|' + String(q.q).replace(/<[^>]+>/g, '').slice(0, 24) : q.id;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(q);
+    if (out.length >= cnt) return out;
+  }
+  for (const q of list) {
+    if (out.includes(q)) continue;
+    out.push(q);
+    if (out.length >= cnt) break;
+  }
+  return out;
+}
 function renderPracConfig() {
   const chips = Object.keys(TOPICS).map((k) => {
     const qs = BANK.filter((q) => q.topic === k);
@@ -2047,7 +2078,7 @@ function startPrac() {
   if (!pool.length) { alert('沒有符合條件的題目'); return; }
   // 未做過優先，其次做過次數少的
   pool = shuffle(pool).sort((a, b) => attemptsOf(a.id).length - attemptsOf(b.id).length);
-  prac = { queue: pool.slice(0, cnt), i: 0, results: [], mode: 'practice' };
+  prac = { queue: dedupeStems(pool, cnt), i: 0, results: [], mode: 'practice' };
   sessionActive = true;
   sessionMode = 'prac';
   snapSession();
