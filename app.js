@@ -2438,7 +2438,7 @@ function qShowJudge(hasAI) {
       ? '<p class="warnc">⚠ 這台裝置還沒拿到 AI key——如果你已在別台填過，重新整理此頁同步後就會自動批改。</p>' : '';
     const noInkHint = qsess.noInk
       ? '<p class="warnc">⚠ AI 沒批改：抓不到手寫筆跡——先寫再按「算完了」。</p>' : '';
-    const diag = qsess.diag ? `<p class="dim" style="font-size:11px">${qsess.diag}</p>` : '';
+    const diag = qsess.diag ? `<p style="font-size:13px;background:#fff8e1;border:1px solid #f0c14b;padding:6px 9px;border-radius:6px;margin:6px 0">🔎 ${qsess.diag}</p>` : '';
     $('#qfb').innerHTML = `${qsess.aiErr ? `<p class="warnc">⚠ AI 批改失敗：${escH(qsess.aiErr)}——先自評，key 問題到「📊 數據」頁按「測試連線」檢查。</p>` : noInkHint || noKeyHint}${diag}${peek}
       <p><b>答對了嗎？</b><span class="dim">（等價形式都算對）</span></p>
       <div class="actr"><button class="btn err" onclick="qResolve(false)">✗ 我錯了</button>
