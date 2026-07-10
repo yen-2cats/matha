@@ -63,14 +63,11 @@ function importData(input) {
 }
 function backupCard() {
   return `<div class="card"><h2>💾 資料備份</h2>
-    <p class="dim"><b>登入雲端同步後，所有紀錄自動跨裝置同步</b>——做題紀錄、錯題本、筆跡、AI key，桌機/手機/平板拿到的都是同一份，
-    這就是你的主要備份。下面的手動匯出是<b>額外保險</b>（雲端之外再留一份離線副本），不再是必要動作；
-    只有「離線 artifact 版」或未登入時，資料才只存本機。</p>
+    <p class="dim">雲端同步就是主備份；這裡是額外的離線副本。</p>
     <div class="actr"><button class="btn" onclick="exportData()">匯出備份（.json）</button>
     <button class="btn" onclick="$('#impfile').click()">匯入備份</button>
     <button class="btn" onclick="exportInk()">匯出今日筆跡</button></div>
     <input type="file" id="impfile" accept=".json,application/json" style="display:none" onchange="importData(this)">
-    <p class="dim">筆跡（手寫板的完整書寫過程）：<b>登入雲端同步時每題自動永久歸檔</b>，供 AI 後續統整分析你的運算習慣；未登入的話只存在本次頁面記憶體，關頁就消失——沒登入練完記得先匯出。</p>
   </div>`;
 }
 
@@ -108,8 +105,8 @@ function inkHTML(opts) {
     <div id="ink-flash" class="ink-flash" style="display:none"></div>
     <div class="ink-scroll"><canvas id="ink-cv" data-h="${phone ? 170 : small ? 240 : 0}"></canvas></div>
     <p class="dim ink-hint">${phone
-      ? '需要動筆記個中間數字就寫這裡（不批改）——作答仍用上面的按鈕。'
-      : '觸控筆書寫（手掌不會誤觸）、兩指上下捲動；寫錯就劃掉或按復原。<b>最終答案寫在計算的最後（圈起來更好認）</b>——AI 會看完整過程、從結尾認答案。'}</p>
+      ? '隨手算用，不批改。'
+      : '兩指捲動；<b>答案寫在最後、圈起來</b>。'}</p>
   </div>`;
 }
 function inkSurface(key, cv, h) {
@@ -584,7 +581,7 @@ function aiKeySave() {
   S.aikeyTs = Date.now();
   try { localStorage.removeItem(AI_LS); } catch (e) {} // 清掉舊版殘留，防止還魂
   save(); // → 雲端同步，所有裝置生效
-  alert('已儲存。登入同一帳號的每台裝置（桌機/手機/平板）都會自動拿到這支 key，記得按「測試連線」確認。');
+  alert('已儲存，全裝置生效。記得按「測試連線」。');
   renderStats();
 }
 function aiKeyClear() {
@@ -595,20 +592,18 @@ function aiKeyClear() {
   renderStats();
 }
 function aiCard() {
-  return `<div class="card"><h2>🤖 AI 批改設定</h2>
-    <p class="dim">填入 API key 後：手寫答案按「算完了」就由 AI 即時批改——認你的字、判對錯（不限定答案順序與形式）、
-    從計算過程指出<b>從哪一步開始算錯</b>、該稱讚時稱讚。<b>key 跟著雲端同步：任一台裝置填一次，桌機/手機/平板全部生效</b>。
-    沒填也能用：改為「看正解自評」模式（一樣不用打字）。</p>
-    <p class="dim">⚠️ <b>要用 platform.claude.com 建立的正式 API key（sk-ant-api03 開頭）</b>，且該帳號要在 Billing 儲值——
-    Claude 訂閱（Pro/Max）的額度<b>不含</b> API。訂閱抓出來的 OAuth token（sk-ant-oat 開頭）雖可暫用，但幾小時就過期、且跟你的 Claude Code 共用限流，不建議。
-    填完先按「測試連線」確認。（離線 artifact 版封鎖外連，AI 批改只在正式站可用）</p>
-    <input id="aikey" class="ans-input" type="password" autocomplete="off" placeholder="sk-ant-api03-..." value="${aiKey() ? '••••••••（已設定）' : ''}">
+  if (aiKey()) {
+    return `<div class="card"><h2>🤖 AI 批改</h2>
+      <p class="dim">key 已設定，全裝置同步生效。</p>
+      <p id="aitest-msg" class="dim"></p>
+      <div class="actr"><button class="btn" onclick="aiKeyClear()">清除 key</button>
+      <button class="btn primary" onclick="aiTest()">測試連線</button></div></div>`;
+  }
+  return `<div class="card"><h2>🤖 AI 批改</h2>
+    <p class="dim">填 platform.claude.com 的正式 key（sk-ant-api03 開頭、Billing 要有儲值），一台填全裝置生效。</p>
+    <input id="aikey" class="ans-input" type="password" autocomplete="off" placeholder="sk-ant-api03-...">
     <p id="aitest-msg" class="dim"></p>
-    <div class="actr">
-      ${aiKey() ? '<button class="btn" onclick="aiKeyClear()">清除 key</button>' : ''}
-      ${aiKey() ? '<button class="btn" onclick="aiTest()">測試連線</button>' : ''}
-      <button class="btn primary" onclick="aiKeySave()">儲存</button>
-    </div></div>`;
+    <div class="actr"><button class="btn primary" onclick="aiKeySave()">儲存</button></div></div>`;
 }
 function stripTags(s) { return String(s).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); }
 function escH(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
@@ -795,8 +790,7 @@ function mlibEmptyMsg() {
   return '這次查回來是空的——1662 條資料確定在雲端，多半是暫時性網路問題，按重試就好。';
 }
 function mlibCard() {
-  return `<div class="card"><h2>🧑‍🏫 老師方法庫</h2>
-      <p class="dim">概念不熟（概念洞）就先調出該單元老師的方法與口訣，看懂再限時重做——1662 條，從 42 堂課逐字稿蒸餾。</p>
+  return `<div class="card"><h2>🧑‍🏫 老師方法庫 <span class="dim">1662 條</span></h2>
       <div class="chips r">${Object.keys(TOPICS).map((k) => `<button class="btn sm" onclick="showMethods('${k}')">${TOPICS[k]}</button>`).join('')}</div>
       <div id="mlib-box"></div></div>`;
 }
@@ -1269,56 +1263,31 @@ function renderHome() {
   const mocks = S.mocks.length;
   let status;
   if (mocks === 0) {
-    status = `<div class="card warn"><b>第一步：先做一次「模擬實戰」摸底。</b><br>
-      你現在最缺的不是題目，是<b>數據</b>——先花 36 分鐘產生第一筆「每題耗時 × 錯因」紀錄，系統才知道你卡在哪。
-      <div class="actr"><button class="btn primary" onclick="nav('mock')">開始摸底模擬 →</button></div></div>`;
+    status = `<div class="card warn"><b>先做一次模擬摸底</b>，產生第一筆耗時×錯因數據。
+      <div class="actr"><button class="btn primary" onclick="nav('mock')">開始 →</button></div></div>`;
   } else {
     const recent = S.attempts.slice(-30);
     const acc = recent.filter((a) => a.ok).length / recent.length;
-    status = `<div class="card"><b>目前體感級分（近 30 題答對率 ${(acc * 100).toFixed(0)}%）：${gradeOf(acc)}</b><br>
-      已累積 ${attempts} 筆做題紀錄、${mocks} 次模擬。到「📊 數據」看你的時間都被哪個單元吃掉。</div>`;
+    status = `<div class="card"><b>體感級分（近 30 題 ${(acc * 100).toFixed(0)}%）：${gradeOf(acc)}</b>｜${attempts} 筆紀錄、${mocks} 次模擬</div>`;
   }
   app().innerHTML = `
   <div class="hero">
     <h1>數A特訓</h1>
-    <p>距離 116 學測（2027/1/22）還有 <b class="accent">${days} 天</b>｜目標：台大獸醫</p>
+    <p>距離 116 學測還有 <b class="accent">${days} 天</b></p>
   </div>
   ${todayCard()}
   ${status}
   ${teachProfileCard()}
-  <div class="card">
-    <h2>你的問題在哪（診斷書）</h2>
-    <p>「我會，但寫不完」＋ 公式都背了 —— 這個組合指向的<b>不是知識缺口，是輸出速度與考試工程</b>：</p>
-    <ol>
-      <li><b>「會」的定義錯了。</b>線上課＋參考書是輸入型學習：看得懂解答、想得起來公式，會產生「熟悉感」。
-        但學測要的是<b>多數題在 90～240 秒內獨立產出</b>（帳面平均 5 分鐘一題，扣掉檢查、讓難題超支後，基本與中等題就剩這個額度）。「看懂」到「限時寫出」中間差一整個訓練量，
-        而你過去的讀書法幾乎沒有練到後者。這叫「熟練度錯覺」——不是比喻，是有實驗證據的效應：集中式練習後，
-        學生對自己考試成績的預測被研究者形容為「嚴重過度自信」。它正是你兩次考出同樣分數的原因：輸入再多，輸出速度沒變。</li>
-      <li><b>你沒有自己的耗時數據。</b>寫不完是「結果」，不是「原因」。真正的原因通常是：某 2~3 類題型你的單題耗時是別人的 2~3 倍
-        （常見兇手：多選逐項判斷、條件機率長題幹、需要翻譯題意的應用題）。不量測就永遠不知道兇手是誰，
-        只會籠統地覺得「時間不夠」。</li>
-      <li><b>基本運算沒有自動化。</b>指對數化簡、特殊角三角值、配方、餘式——這些動作如果還要「想 3 秒」，
-        工作記憶就被占滿，難題沒腦力、簡單題變慢。公式「背得出來」和「不經思考直接用」是兩個等級。</li>
-      <li><b>缺考試工程：</b>沒有跳題紀律（90 秒無路線就跳）、沒有兩輪作答、沒有把「會的題 100% 拿到」當第一目標。
-        這個分段的人常常不是難題不會，而是<b>會的題目只拿到七成</b>——超時、粗心、沒時間檢查。</li>
-    </ol>
-    <p><b>換算給你聽（113~115 官方對照表核實過）：</b>得分率約 50% ≈ 目前分段，三年皆成立。
-    而目標門檻其實只要 <b>69~74%</b>（113 年 74.0 分、114 年 73.5、115 年 68.7）——80 分在近兩年已經再上一階。
-    所以目標線是<b>雙線制：73% 保底線、80% 進攻線</b>。你要補的 20~25 個百分點裡，
-    相當大一部分不是「學新東西」，而是把<b>你已經會的題目的失分（超時未完成＋粗心）</b>收回來
-    （這個佔比是本系統的估計，你的錯因數據會逐週驗證它）。這就是為什麼這個系統練的是速度與流程，不是再上一輪課。</p>
-  </div>
-  <div class="card">
-    <h2>切角：四條訓練線</h2>
-    <table class="tbl">
-      <tr><th>訓練線</th><th>解決什麼</th><th>頻率</th></tr>
-      <tr><td><b>⚡ 速度特訓</b><br>基本運算限時連發</td><td>把公式從「背得出」練到「反射」，釋放工作記憶</td><td>每天 10 分鐘（暖身）</td></tr>
-      <tr><td><b>🎯 主題刷題</b><br>每題帶碼表＋錯因分類</td><td>找出吃時間的單元；「會但慢」的題現形</td><td>每天 30~40 分鐘</td></tr>
-      <tr><td><b>⏱️ 模擬實戰</b><br>兩輪作答法訓練</td><td>跳題紀律、時間分配、先收會的分</td><td>每週 2 次</td></tr>
-      <tr><td><b>📓 錯題本</b><br>間隔重測（1→3→7→14天）</td><td>錯過的題不再錯第二次；連對四次才畢業</td><td>每天 10 分鐘（到期題）</td></tr>
-    </table>
-    <p class="dim">內建題庫是自製訓練題，用來練「速度與流程」。進入 9~11 月後，主戰場換成大考中心的<b>歷屆試題</b>（108 課綱後的數A卷），本系統的模擬實戰改為輔助維持手感。</p>
-  </div>`;
+  <details class="card"><summary class="dim">為什麼這樣練</summary>
+    <ul>
+      <li>「看懂」≠「限時寫出」——練輸出速度與考試工程，不是再上一輪課。</li>
+      <li>先量測：揪出耗時 2~3 倍的題型，不要籠統的「時間不夠」。</li>
+      <li>基本運算練到反射，工作記憶留給難題。</li>
+      <li>跳題紀律＋兩輪作答：會的題 100% 拿到。</li>
+      <li>目標雙線：73% 保底、80% 進攻——缺口大半是把「會但失分」收回來。</li>
+      <li>9~11 月起主戰場換歷屆卷，這裡改當手感維持。</li>
+    </ul>
+  </details>`;
 }
 
 /* ═══════════ 速度特訓 ═══════════ */
@@ -1630,17 +1599,16 @@ function renderPhone() {
   const hist = (S.phone && S.phone.hist || []).slice(-6);
   app().innerHTML = `
     <h1>📱 手機專區</h1>
-    <p class="dim">通勤、排隊、零碎時間用：<b>按鈕作答</b>、單手就能練；心算快答附一小塊筆記區，需要隨手記個數字可以寫（不批改）。
-    內容鎖定學測數A「該背得出來、該心算得出來」的公式、定理、幾何原則、特殊值，以及老師 42 堂課強調要背的口訣。紀錄一樣自動上雲。</p>
+    <p class="dim">零碎時間用，按鈕作答、單手可練。</p>
     <div class="grid">
       <div class="card drill-card"><b>⚡ 心算快答</b>
-        <p class="dim">特殊角、指對數、二次頂點、C/P、內積、行列式、根式化簡……12 題連發、4 選 1。</p>
+        <p class="dim">12 題連發、4 選 1。</p>
         <button class="btn primary" onclick="startPhoneQuiz()">開始 12 題</button></div>
       <div class="card drill-card"><b>🧠 公式必背卡</b>
-        <p class="dim">學測範圍必背公式／定理／幾何原則（${FLASH.length} 張）：看題面→翻面→按「記得/忘了」。忘過的卡會更常出現。</p>
+        <p class="dim">${FLASH.length} 張，忘過的更常出現。</p>
         <button class="btn primary" onclick="startPhoneFlash('formula')">抽 10 張</button></div>
       <div class="card drill-card"><b>🧑‍🏫 老師口訣卡</b>
-        <p class="dim">42 堂課蒸餾的口訣（1500+ 條）——老師上課強調該背的都在這。第一次要登入載入。</p>
+        <p class="dim">1500+ 條老師口訣。</p>
         <button class="btn primary" onclick="startPhoneFlash('mn')">抽 10 張</button></div>
     </div>
     ${p ? `<div class="card"><p>📅 今日手機練：<b>${p.n}</b> 題/卡｜答對/記得 <b>${p.ok}</b>（${p.n ? Math.round(100 * p.ok / p.n) : 0}%）</p></div>` : ''}
@@ -1678,7 +1646,7 @@ function phoneQuizNext() {
       <div class="pbtns">${it.opts.map((o, i) => `<button class="btn pbtn" onclick="phoneTap(${i})">${o}</button>`).join('')}</div>
       <div id="pfb"></div></div>
     ${inkHTML({ phone: true })}
-    <p class="dim" style="text-align:center">${it.src}｜按鈕作答，筆記區只是隨手算</p>`;
+    <p class="dim" style="text-align:center">${it.src}</p>`;
   sessionChrome(true);
   inkStart(`phone-q${phone.i + 1}`, phone.t0);
   startTicker(() => { const t = $('#ptimer'); if (t) t.textContent = ((Date.now() - phone.t0) / 1000).toFixed(1) + 's'; });
@@ -1894,7 +1862,7 @@ function drillNext() {
   drill.t0 = Date.now();
   drill.qid = `drill:${drill.key}:${drill.t0}`;
   const input = it.kind === 'num'
-    ? `<p class="dim">✍️ 在下方計算區作答，答案寫在最後：</p>
+    ? `<p class="dim">✍️ 答案寫在最後：</p>
        <div class="actr"><button class="btn primary big" onclick="drillSubmit()">✅ 算完了</button></div>
        <details class="typed-opt"><summary class="dim">改用打字（選用）</summary>
        <input id="din" class="ans-input" inputmode="text" autocomplete="off" placeholder="答案" onkeydown="if(event.key==='Enter')drillSubmit()"></details>`
@@ -2067,7 +2035,6 @@ function renderPracConfig() {
   }).join('');
   app().innerHTML = `
     <h1>🎯 主題刷題</h1>
-    <p>每題帶碼表；到達「理想中該答完的時間點」會提醒一次（就一次，不疲勞轟炸）。答錯要選錯因——錯因數據決定你之後練什麼。</p>
     <div class="card">
       <h3>單元（預設全選）</h3>
       <div class="actr" style="justify-content:flex-end">
@@ -2184,7 +2151,7 @@ function renderQuestion(q, cfg) {
       `<label class="opt block check"><input type="checkbox" value="${i}"> (${i + 1}) ${mDispOpt(o)}</label>`).join('')
       + `<div class="actr"><button class="btn primary" onclick="qSubmit()">送出（多選）</button></div>`;
   } else {
-    ansUI = `<p class="dim">✍️ 整頁都能寫——題目上、旁邊、下方計算區都行；<b>最終答案寫在最後</b>，寫完按：</p>
+    ansUI = `<p class="dim">✍️ 整頁可寫，<b>答案寫在最後</b>：</p>
       <div class="actr"><button class="btn primary big" onclick="qSubmit()">✅ 算完了，開始批改</button></div>
       <details class="typed-opt"><summary class="dim">改用打字（選用）</summary>
       <input id="qin" class="ans-input" autocomplete="off" placeholder="輸入答案（分數用 a/b）" onkeydown="if(event.key==='Enter')qSubmit()"></details>`;
@@ -2287,9 +2254,9 @@ function qShowJudge(hasAI) {
     const noKeyHint = !qsess.aiErr && !aiKey() && supa && syncState.user
       ? '<p class="warnc">⚠ 這台裝置還沒拿到 AI key——如果你已在別台填過，重新整理此頁同步後就會自動批改。</p>' : '';
     const noInkHint = qsess.noInk
-      ? '<p class="warnc">⚠ AI 沒批改的原因：這一題抓不到任何手寫筆跡——請把過程與答案寫在下方「✍️ 計算區」（寫在題目上也行），寫完再按「算完了」。</p>' : '';
+      ? '<p class="warnc">⚠ AI 沒批改：抓不到手寫筆跡——先寫再按「算完了」。</p>' : '';
     $('#qfb').innerHTML = `${qsess.aiErr ? `<p class="warnc">⚠ AI 批改失敗：${escH(qsess.aiErr)}——先自評，key 問題到「📊 數據」頁按「測試連線」檢查。</p>` : noInkHint || noKeyHint}${peek}
-      <p><b>對照你答案區寫的——答對了嗎？</b><span class="dim">（等價形式都算對：多根順序不同、沒化簡、有沒有寫 x= 都算；座標類順序要照題目）</span></p>
+      <p><b>答對了嗎？</b><span class="dim">（等價形式都算對）</span></p>
       <div class="actr"><button class="btn err" onclick="qResolve(false)">✗ 我錯了</button>
       <button class="btn primary" onclick="qResolve(true)">✓ 我對了</button></div>`;
   }
@@ -2351,19 +2318,10 @@ function qFinish(ok, ms, err) {
 function renderMockIntro() {
   const n = S.mocks.length;
   app().innerHTML = `
-    <h1>⏱️ 模擬實戰（兩輪作答法訓練）</h1>
+    <h1>⏱️ 模擬實戰</h1>
     <div class="card">
-      <p><b>12 題、36 分鐘</b>，難度混合。節奏刻意比帳面快：學測是 100 分鐘約 20 題，帳面平均 5 分鐘一題——
-      但扣掉 15~20 分鐘檢查，再讓最難的 3~4 題與混合題各吃 6~10 分鐘，<b>剩下的基本題、中等題實際只分得到約 3 分鐘</b>
-      （名師實戰配速表同一個方向：單選約 3.6 分／題、多選約 4.2 分／題，全卷預留 10~20 分鐘驗算＋畫卡）。
-      每題都照 5 分鐘的節奏寫，就是「寫不完」的節奏。規則就是考場規則：</p>
-      <ol>
-        <li><b>第一輪：</b>每題先花 20 秒判斷「我知不知道第一步」。知道 → 做；不知道或猶豫 → <b>按跳過</b>，不辯論。</li>
-        <li><b>第二輪：</b>回頭處理跳過的題，直到時間用完。</li>
-        <li>作答中<b>不會顯示對錯</b>（跟考場一樣），全部結束才對答案。</li>
-        <li>每題顯示建議時間上限，超過就該停損——系統會記錄你「該跳沒跳」幾次。</li>
-      </ol>
-      <p class="dim">已完成 ${n} 次模擬。${n === 0 ? '第一次就是摸底，考差完全沒關係——我們要的是數據。' : ''}</p>
+      <p><b>12 題、36 分鐘</b>｜兩輪作答：20 秒內沒路就跳，第二輪回頭；途中不顯示對錯。</p>
+      <p class="dim">已完成 ${n} 次模擬。</p>
       <div class="actr"><button class="btn primary big" onclick="startMock()">開始模擬（36:00 倒數）</button></div>
     </div>`;
 }
@@ -2421,7 +2379,7 @@ function mockQ() {
     ansUI = q.opts.map((o, i) => `<label class="opt block check"><input type="checkbox" value="${i}"> (${i + 1}) ${mDispOpt(o)}</label>`).join('')
       + `<div class="actr"><button class="btn primary" onclick="mockAns()">送出此題</button></div>`;
   } else {
-    ansUI = `<p class="dim">✍️ 整頁都能寫——題目上、旁邊、下方計算區都行；<b>最終答案寫在最後</b>，寫完按：</p>
+    ansUI = `<p class="dim">✍️ 整頁可寫，<b>答案寫在最後</b>：</p>
       <div class="actr"><button class="btn primary big" onclick="mockAns()">✅ 算完了 → 下一題</button></div>
       <details class="typed-opt"><summary class="dim">改用打字（選用）</summary>
       <input id="qin" class="ans-input" autocomplete="off" placeholder="答案（分數用 a/b）" onkeydown="if(event.key==='Enter')mockAns()"></details>`;
@@ -2654,7 +2612,7 @@ function mockFinal() {
       </ul>
       ${aiNotes ? `<div class="sol"><b>🤖 AI 抓到的出錯點：</b><ul>${aiNotes}</ul></div>` : ''}
       <table class="tbl"><tr><th>題目</th><th>結果</th><th>你的答案</th><th>正解</th><th>耗時/建議</th></tr>${rows}</table>
-      <p class="dim">錯題與超時題已自動加入錯題本，明天到期重測。詳解請到錯題本逐題看。</p>
+      <p class="dim">錯題與超時題已進錯題本，明天到期。</p>
       <div class="actr"><button class="btn" onclick="nav('stats')">看數據</button>
       <button class="btn primary" onclick="nav('wrong')">去看錯題詳解</button></div>
     </div>`;
@@ -2665,7 +2623,7 @@ function renderWrong() {
   const ids = Object.keys(S.wrong);
   const due = dueWrong();
   if (!ids.length) {
-    app().innerHTML = `<h1>📓 錯題本</h1><div class="card"><p>目前沒有錯題。去「主題刷題」或「模擬實戰」產生一些吧——錯題是最高價值的訓練材料。</p></div>${mlibCard()}`;
+    app().innerHTML = `<h1>📓 錯題本</h1><div class="card"><p>目前沒有錯題。</p></div>${mlibCard()}`;
     return;
   }
   const rows = ids.map((id) => {
@@ -2679,13 +2637,12 @@ function renderWrong() {
       <td><button class="btn sm" onclick="reviewOne('${jsA(id)}')">重測</button></td></tr>`;
   }).join('');
   app().innerHTML = `
-    <h1>📓 錯題本 <span class="dim">（間隔重測 1→3→7→14 天，連過四關畢業）</span></h1>
-    ${due.length ? `<div class="card warn"><b>${due.length} 題今天到期。</b>先清這些，再刷新題——重測到期錯題的投報率是刷新題的 3 倍。
-      <div class="actr"><button class="btn primary" onclick="reviewDue()">開始重測到期題（${due.length}）</button></div></div>` : '<div class="card good">今天沒有到期的錯題 ✅</div>'}
+    <h1>📓 錯題本 <span class="dim">1→3→7→14 天</span></h1>
+    ${due.length ? `<div class="card warn"><b>${due.length} 題今天到期。</b>
+      <div class="actr"><button class="btn primary" onclick="reviewDue()">開始重測（${due.length}）</button></div></div>` : '<div class="card good">今天沒有到期的錯題 ✅</div>'}
     <div class="card"><table class="tbl"><tr><th>題目</th><th>錯因</th><th>次數</th><th>下次重測</th><th></th></tr>${rows}</table></div>
     ${mlibCard()}
-    <div class="card"><p class="dim"><b>訂正標準（名師版）：</b>不是「看懂詳解」，是能自己說出<b>題目的關鍵條件 → 對應的工具（公式/定理）→ 第一步</b>這條鏈。
-    說不出來就還沒訂正完，重測時會原形畢露。</p></div>`;
+    <p class="dim">訂正標準：能自己說出「關鍵條件 → 工具 → 第一步」才算訂正完。</p>`;
 }
 let review = null;
 function reviewDue() { if (!syncGate()) return; startReview(dueWrong()); }
@@ -2731,7 +2688,7 @@ function reviewNext() {
 /* ═══════════ 數據 ═══════════ */
 function renderStats() {
   if (!S.attempts.length) {
-    app().innerHTML = `<h1>📊 數據</h1>${dailyCard()}<div class="card"><p>還沒有做題數據。先去做一次「模擬實戰」摸底，或刷一輪主題題。</p>
+    app().innerHTML = `<h1>📊 數據</h1>${dailyCard()}<div class="card"><p>還沒有做題數據。</p>
       <div class="actr"><button class="btn primary" onclick="nav('mock')">去摸底</button></div></div>${aiCard()}${syncCard()}${backupCard()}`;
     return;
   }
@@ -2784,8 +2741,7 @@ function renderStats() {
         const q = bankById(a.qid);
         return `<li>${q ? TOPICS[q.topic] : a.qid}：單次停頓 <b class="warnc">${m}s</b>（${a.d}${a.ok ? '，最後有解出來' : '，最後沒解出來'}）</li>`;
       }).join('')}</ul>` : ''}
-      <p class="dim">判讀：<b>起筆慢</b>（>30s）→ 讀題轉化慢，練「看到題型就知道第一步」；<b>題中長停頓</b> → 解法鏈中段斷裂，
-      該題型的完整路線沒背熟；<b>塗改多</b> → 動筆前先想 5 秒路線再寫；<b>長停頓後放棄</b> → 跳題紀律其實是對的，問題在第一步判讀。</p></div>`;
+      <p class="dim">起筆慢→練第一步判讀；長停頓→路線沒背熟；塗改多→先想 5 秒再動筆。</p></div>`;
   }
   // 模擬歷史
   const mockRows = S.mocks.map((m) => `<tr><td>${m.d}</td><td>${m.ok}/${m.n}</td><td>${(m.acc * 100).toFixed(0)}%</td><td>${gradeOf(m.acc)}</td></tr>`).join('');
@@ -2799,10 +2755,8 @@ function renderStats() {
   app().innerHTML = `
     <h1>📊 數據</h1>
     ${dailyCard()}
-    ${worst.length ? `<div class="card warn"><b>本週優先攻擊目標：</b>${worst.map((t) => TOPICS[t.k]).join('、')}
-      <span class="dim">（答對率最低／耗時比最高的單元——把刷題時間集中在這裡，不要平均分配）</span></div>` : ''}
-    <div class="card"><h2>單元答對率與速度比</h2>
-      <p class="dim">速度比 = 實際耗時 ÷ 目標時間。大於 1.00× 代表這個單元在吃你的考試時間。</p>${bars}</div>
+    ${worst.length ? `<div class="card warn"><b>本週優先攻擊：</b>${worst.map((t) => TOPICS[t.k]).join('、')}</div>` : ''}
+    <div class="card"><h2>單元答對率與速度比 <span class="dim">速度比 >1× ＝ 吃時間</span></h2>${bars}</div>
     <div class="card"><h2>錯因分布 → 對症處方</h2>${errBars}${advice ? `<ul>${advice}</ul>` : ''}</div>
     ${procCard}
     ${drillRows ? `<div class="card"><h2>速度特訓進度</h2><table class="tbl"><tr><th>項目</th><th>輪數</th><th>中位數變化</th><th>狀態</th></tr>${drillRows}</table></div>` : ''}
@@ -2832,27 +2786,24 @@ function renderPlan() {
     <div class="card">
       <h2>今日清單（每天約 60 分鐘數A）</h2>
       <div class="actr"><button class="btn primary big" onclick="startDaily()">▶ 一鍵開始今日菜單</button></div>
-      <p class="dim">一鍵＝自動排程「速訓（挑最該練的）→ 清到期錯題 → 刷題 8 題（挑最弱單元）」，每段做完自動打勾，不用自己選。</p>
       ${checklist}
-      <p class="dim">已執行 ${streak} 天。每週三、六把「主題限時」換成一次「⏱️ 模擬實戰」。</p>
+      <p class="dim">已執行 ${streak} 天｜週三、六改打一場模擬。</p>
     </div>
     <div class="card">
       <h2>三階段路線（現在 → 2027/1/22）</h2>
       <table class="tbl">
         <tr><th>階段</th><th>期間</th><th>主軸</th><th>檢查點</th></tr>
-        <tr><td><b>① 自動化＋補洞</b></td><td>7~8 月（8 週）</td>
-          <td>速度特訓全部達標；用本系統地毯式限時刷完 14 單元；錯題滾動清零。<b>新的線上課一律停掉</b>；唯一例外：
-          錯因數據指出某單元是真概念洞（連續錯在「概念不熟」），才回去看該單元的課或詳解，
-          且 24 小時內必須限時重做同型題——看懂不算數，寫出來才算。</td>
-          <td>8 月底：模擬答對率穩定 ≥ 70%，「該跳沒跳」= 0</td></tr>
-        <tr><td><b>② 歷屆實戰</b></td><td>9~11 月（12 週）</td>
-          <td>主戰場換成<b>大考中心歷屆數A卷</b>（111~115），每週 1 份全真限時＋逐題耗時分析（照本系統的格式手記或拍照記錄）；本系統改當暖身與錯題庫。</td>
-          <td>11 月底：歷屆卷得分率 ≥ 78%，全卷寫得完且留 15 分鐘檢查</td></tr>
-        <tr><td><b>③ 穩定輸出</b></td><td>12~1 月（6 週）</td>
-          <td>每週 2 次全真模擬（含塗卡）；不碰新題型，只重測錯題本；把考場流程（先易後難、90 秒停損、最後 15~20 分鐘檢查）練成儀式。</td>
-          <td>考前：連續 3 次模擬 ≥ 78%（80% 已進進攻線）</td></tr>
+        <tr><td><b>① 自動化＋補洞</b></td><td>7~8 月</td>
+          <td>速訓全達標；限時刷完 14 單元；錯題清零；不上新課</td>
+          <td>8 月底：模擬 ≥ 70%、「該跳沒跳」= 0</td></tr>
+        <tr><td><b>② 歷屆實戰</b></td><td>9~11 月</td>
+          <td>每週 1 份歷屆數A全真限時；本系統當暖身＋錯題庫</td>
+          <td>11 月底：歷屆卷 ≥ 78%、寫得完留 15 分檢查</td></tr>
+        <tr><td><b>③ 穩定輸出</b></td><td>12~1 月</td>
+          <td>每週 2 次全真模擬（含塗卡）；只重測錯題，不碰新題</td>
+          <td>考前：連 3 次模擬 ≥ 78%</td></tr>
       </table>
-      <p><b>唯一鐵律：</b>從今天起，<b>沒有計時的數學練習一律不算練習</b>。</p>
+      <p><b>鐵律：沒有計時的練習不算練習。</b></p>
     </div>
     <div class="card">
       <h2>考場 SOP（背下來）</h2>
@@ -3085,7 +3036,7 @@ function syncCard() {
     <p class="dim">這個網頁環境封鎖外部連線（claude.ai artifact），雲端同步自動停用——資料照常存本機，可用下方備份匯出。
     要用同步版請開本機版 index.html 或自架網址。</p></div>`;
   if (!syncState.user) return `<div class="card"><h2>☁️ 雲端同步</h2>
-    <p class="dim">登入後：做題紀錄跨裝置自動同步、手寫筆跡永久保存（換裝置、清瀏覽器都不怕）。帳號打使用者名稱就好，不用完整 email。</p>
+    <p class="dim">帳號打使用者名稱就好。</p>
     <input id="sy-email" class="ans-input" autocomplete="username" placeholder="帳號（不用打 @gmail.com）" value="${escH((() => { try { return (localStorage.getItem('mathA13_email') || '').replace(/@gmail\.com$/, ''); } catch (e) { return ''; } })())}">
     <input id="sy-pass" class="ans-input" type="password" autocomplete="current-password" placeholder="密碼（至少 6 碼）">
     <div class="actr">
