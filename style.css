@@ -117,6 +117,25 @@ label.opt.block input { margin-right: 8px; accent-color: var(--accent); }
 
 .qcard { padding: 14px; position: relative; }
 .qwrap { position: relative; }
+/* ═══ 學測題本樣式 ═══ */
+.qcard.booklet { padding: 0; background: #fefefd; border: 1px solid #d8d4c8; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  font-family: "Noto Serif CJK TC", "Noto Serif TC", "Source Han Serif TC", "Songti TC", "MingLiU", "PMingLiU", serif; }
+.bk-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px;
+  border-bottom: 1.5px solid #33312c; font-size: 14px; color: #33312c; }
+.bk-exam { letter-spacing: 1px; }
+.bk-sect { border: 1.5px solid #33312c; border-radius: 2px; padding: 1px 10px; font-weight: 700; }
+.bk-item { display: flex; gap: 8px; padding: 18px 16px 20px; }
+.bk-num { font-weight: 700; font-size: 18px; color: #1a1a1a; flex: none; min-width: 1.4em; }
+.bk-content { flex: 1; font-size: 18px; line-height: 1.85; color: #1a1a1a; }
+.bk-content .qfig { margin: 14px auto 6px; }
+.bk-opts { margin-top: 14px; display: flex; flex-direction: column; gap: 2px; }
+.bk-opt { display: flex; gap: 8px; align-items: baseline; padding: 7px 10px; border-radius: 4px; cursor: pointer; }
+.bk-opt:active { background: #f0ede3; }
+.bk-op { flex: none; font-weight: 600; }
+.bk-opt:has(:checked) { background: #eaf5f2; box-shadow: inset 0 0 0 1.5px var(--accent); }
+.bk-opt:has(:checked) .bk-op { color: var(--accent); }
+.qcard.booklet .ansarea { padding: 0 16px 14px; }
+.qcard.booklet #qfb { padding: 0 16px; }
 /* 整卡書寫層：蓋住題目＋選項＋按鈕（跟題本一樣整面能寫）；輕點會穿透到按鈕 */
 .qink { position: absolute; inset: 0; touch-action: none; cursor: crosshair; z-index: 2; }
 .qtext { font-size: 17px; margin-bottom: 12px; }

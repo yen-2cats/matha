@@ -2289,21 +2289,45 @@ function pracDone() {
 }
 
 /* ═══════════ 單題渲染（刷題與錯題重測共用） ═══════════ */
+/* ═══ 學測題本樣式：段落標頭＋題號外突＋(1)(2) 直排選項，讀寫都像真考卷 ═══ */
+function sectionLabel(q) { return q.type === 'single' ? '單選題' : q.type === 'multi' ? '多選題' : '選填／非選題'; }
+function bkNum(head) { const m = String(head || '').match(/(\d+)/); return m ? m[1] + '.' : '※'; }
+/* 選項印在題目正下方（像考卷），tap 仍作答；submitFn：single→'qSubmit'|'mockAns'（帶索引），multi→送出鈕 */
+function bkOpts(q, submitFn) {
+  if (q.type === 'single') {
+    return `<div class="bk-opts">${q.opts.map((o, i) =>
+      `<div class="bk-opt" onclick="${submitFn}(${i})"><span class="bk-op">(${i + 1})</span><span>${mDispOpt(o)}</span></div>`).join('')}</div>`;
+  }
+  if (q.type === 'multi') {
+    return `<div class="bk-opts">${q.opts.map((o, i) =>
+      `<label class="bk-opt"><input type="checkbox" value="${i}" hidden><span class="bk-op">(${i + 1})</span><span>${mDispOpt(o)}</span></label>`).join('')}</div>`;
+  }
+  return '';
+}
+/* 題本卡：段落標頭 + 題號 + 題幹 + 選項；bodyId 讓 canvas/回饋掛得上 */
+function bkCard(q, head, submitFn, actions) {
+  return `<div class="card qcard booklet">
+    <div class="bk-head"><span class="bk-exam">數學Ａ</span><span class="bk-sect">${sectionLabel(q)}</span></div>
+    <div class="bk-item"><span class="bk-num">${bkNum(head)}</span>
+      <div class="bk-content">${rtTxt(q.q)}${q.fig ? `<div class="qfig">${q.fig}</div>` : ''}${bkOpts(q, submitFn)}</div></div>
+    <div class="ansarea">${actions}</div>
+    <div id="qfb"></div>
+    <canvas id="qink-cv" class="qink"></canvas>
+  </div>`;
+}
 let qsess = null;
 function renderQuestion(q, cfg) {
   qsess = { q, cfg, t0: Date.now(), warned: false, locked: false };
   const target = qTarget(q);
-  let ansUI;
+  const giveUp = `<button class="btn sm skip" onclick="qGiveUp()">🏳 放棄，看答案</button>`;
+  let actions;
   if (q.type === 'single') {
-    ansUI = q.opts.map((o, i) =>
-      `<button class="btn opt block" onclick="qSubmit(${i})">(${i + 1}) ${mDispOpt(o)}</button>`).join('');
+    actions = `<div class="actr">${giveUp}</div>`; // 點選項即作答
   } else if (q.type === 'multi') {
-    ansUI = q.opts.map((o, i) =>
-      `<label class="opt block check"><input type="checkbox" value="${i}"> (${i + 1}) ${mDispOpt(o)}</label>`).join('')
-      + `<div class="actr"><button class="btn primary" onclick="qSubmit()">送出（多選）</button></div>`;
+    actions = `<div class="actr">${giveUp}<button class="btn primary" onclick="qSubmit()">送出（多選）</button></div>`;
   } else {
-    ansUI = `<p class="dim">✍️ 整頁可寫，<b>答案寫在最後</b>：</p>
-      <div class="actr"><button class="btn primary big" onclick="qSubmit()">✅ 算完了，開始批改</button></div>
+    actions = `<p class="dim">✍️ 整頁可寫，<b>答案寫在最後</b>：</p>
+      <div class="actr">${giveUp}<button class="btn primary big" onclick="qSubmit()">✅ 算完了，開始批改</button></div>
       <details class="typed-opt"><summary class="dim">改用打字（選用）</summary>
       <input id="qin" class="ans-input" autocomplete="off" placeholder="輸入答案（分數用 a/b）" onkeydown="if(event.key==='Enter')qSubmit()"></details>`;
   }
@@ -2315,13 +2339,7 @@ function renderQuestion(q, cfg) {
     </div>
     <div class="timebar"><div id="tbfill" class="timebar-fill"></div></div>
     <div id="q-flash" class="ink-flash" style="display:none"></div>
-    <div class="card qcard">
-      <div class="qwrap"><div class="qtext">${rtTxt(q.q)}${q.fig ? `<div class="qfig">${q.fig}</div>` : ''}</div></div>
-      <div class="ansarea">${ansUI}
-        <div class="actr"><button class="btn sm skip" onclick="qGiveUp()">🏳 放棄，看答案</button></div></div>
-      <div id="qfb"></div>
-      <canvas id="qink-cv" class="qink"></canvas>
-    </div>
+    ${bkCard(q, cfg.head, 'qSubmit', actions)}
     ${inkHTML()}`;
   sessionChrome(true);
   inkStart(q.id, qsess.t0);
@@ -2344,7 +2362,7 @@ function qGiveUp() {
   qsess.ms = Date.now() - qsess.t0;
   stopTicker();
   qsess.proc = inkStop();
-  document.querySelectorAll('.ansarea button, .ansarea input').forEach((b) => (b.disabled = true));
+  document.querySelectorAll('.qcard button, .qcard input').forEach((b) => (b.disabled = true));
   qsess.yourAns = '（放棄，看答案）';
   qsess.gaveUp = true;
   qResolve(false);
@@ -2356,7 +2374,7 @@ function qSubmit(optIdx) {
   qsess.ms = ms;
   stopTicker();
   qsess.proc = inkStop();
-  document.querySelectorAll('.ansarea button, .ansarea input').forEach((b) => (b.disabled = true));
+  document.querySelectorAll('.qcard button, .qcard input').forEach((b) => (b.disabled = true));
   const go = () => qGrade(optIdx);
   if (ms >= 360000) {
     modal(`<h2>⏸ 這題用了 ${fmtSec(ms)}</h2><p>超過 6 分鐘——是不是有中途離開座位？有的話這筆不列入紀錄，避免污染數據（詳解照樣看得到）。</p>`, [
@@ -2369,7 +2387,7 @@ function qGrade(optIdx) {
   const { q } = qsess;
   if (q.type === 'single') { qsess.yourAns = `(${optIdx + 1})`; qResolve(optIdx === q.ans[0]); return; }
   if (q.type === 'multi') {
-    const chosen = [...document.querySelectorAll('.ansarea input:checked')].map((i) => +i.value);
+    const chosen = [...document.querySelectorAll('.bk-opts input:checked')].map((i) => +i.value);
     qsess.yourAns = chosen.length ? chosen.map((c) => `(${c + 1})`).join('') : '（未選）';
     qResolve(chosen.length === q.ans.length && q.ans.every((a) => chosen.includes(a)));
     return;
@@ -2523,17 +2541,19 @@ function mockQ() {
   mock.t0 = Date.now();
   mock.qwarned = false;
   mock.qlock = false;
-  let ansUI;
+  const mockRow = `<div class="mock-actions">
+      ${mock.round === 1 ? `<button class="btn skip" onclick="mockSkip()">跳過 → 第二輪</button>` : `<button class="btn skip" onclick="mockGiveup()">放棄此題</button>`}
+      <span id="mqtimer" class="dim"></span></div>`;
+  let actions;
   if (q.type === 'single') {
-    ansUI = q.opts.map((o, i) => `<button class="btn opt block" onclick="mockAns(${i})">(${i + 1}) ${mDispOpt(o)}</button>`).join('');
+    actions = mockRow; // 點選項即作答
   } else if (q.type === 'multi') {
-    ansUI = q.opts.map((o, i) => `<label class="opt block check"><input type="checkbox" value="${i}"> (${i + 1}) ${mDispOpt(o)}</label>`).join('')
-      + `<div class="actr"><button class="btn primary" onclick="mockAns()">送出此題</button></div>`;
+    actions = `<div class="actr"><button class="btn primary" onclick="mockAns()">送出此題</button></div>${mockRow}`;
   } else {
-    ansUI = `<p class="dim">✍️ 整頁可寫，<b>答案寫在最後</b>：</p>
+    actions = `<p class="dim">✍️ 整頁可寫，<b>答案寫在最後</b>：</p>
       <div class="actr"><button class="btn primary big" onclick="mockAns()">✅ 算完了 → 下一題</button></div>
       <details class="typed-opt"><summary class="dim">改用打字（選用）</summary>
-      <input id="qin" class="ans-input" autocomplete="off" placeholder="答案（分數用 a/b）" onkeydown="if(event.key==='Enter')mockAns()"></details>`;
+      <input id="qin" class="ans-input" autocomplete="off" placeholder="答案（分數用 a/b）" onkeydown="if(event.key==='Enter')mockAns()"></details>${mockRow}`;
   }
   app().innerHTML = `
     <div class="session-head">
@@ -2542,15 +2562,7 @@ function mockQ() {
       <button class="btn sm xbtn" onclick="exitFlow()" title="離開">✕</button></span>
     </div>
     <div id="q-flash" class="ink-flash" style="display:none"></div>
-    <div class="card qcard">
-      <div class="qwrap"><div class="qtext">${rtTxt(q.q)}${q.fig ? `<div class="qfig">${q.fig}</div>` : ''}</div></div>
-      <div class="ansarea">${ansUI}</div>
-      <div class="mock-actions">
-        ${mock.round === 1 ? `<button class="btn skip" onclick="mockSkip()">跳過 → 第二輪</button>` : `<button class="btn skip" onclick="mockGiveup()">放棄此題</button>`}
-        <span id="mqtimer" class="dim"></span>
-      </div>
-      <canvas id="qink-cv" class="qink"></canvas>
-    </div>
+    ${bkCard(q, '第 ' + (mock.i + 1) + ' 題', 'mockAns', actions)}
     ${inkHTML()}`;
   sessionChrome(true);
   inkStart(q.id, mock.t0, mock.sessT0); // 第二輪回頭時保留第一輪筆跡；更早的舊筆跡歸檔
@@ -2580,7 +2592,7 @@ function mockAns(optIdx) {
   const elapsed = Date.now() - mock.t0;
   let ans;
   if (q.type === 'single') ans = { type: 'single', v: optIdx };
-  else if (q.type === 'multi') ans = { type: 'multi', v: [...document.querySelectorAll('.ansarea input:checked')].map((i) => +i.value) };
+  else if (q.type === 'multi') ans = { type: 'multi', v: [...document.querySelectorAll('.bk-opts input:checked')].map((i) => +i.value) };
   else {
     const typed = $('#qin') ? $('#qin').value.trim() : '';
     ans = typed ? { type: 'fill', v: typed } : { type: 'inkfill' };
