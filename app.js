@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0711m'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0711n'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -815,10 +815,43 @@ function mlibCard() {
 }
 /* 根號 → KaTeX 正式根式（√ 上有橫線蓋住被開方數）。殘留的 √ 原字轉成 \(\sqrt{}\) 島。
    已是 \sqrt 的（工作流轉好的內容）不含 √ 字元，不會被重複處理。 */
+// 把純文字根號（√數字、係數√數字、√(算式)）轉成 KaTeX \(\sqrt{...}\)。用小 parser 取代舊 regex：
+// 舊版遇到「巢狀根號」√(a+√b) 會拆成島中島＋\sqrt 裡塞 \( 而爆掉；parser 版遞迴處理內層、只包一層島。
 function rtTxt(s) {
-  return String(s)
-    .replace(/√\(([^()<>]+)\)/g, '\\(\\sqrt{$1}\\)')
-    .replace(/(\d+)?√(\d+(?:\.\d+)?)/g, (m, co, rad) => '\\(' + (co || '') + '\\sqrt{' + rad + '}\\)');
+  s = String(s);
+  let out = '';
+  for (let i = 0; i < s.length;) {
+    const c = s[i];
+    if (c >= '0' && c <= '9') { // 可能是「係數√數字」（√(...) 不吃係數，跟舊 regex 一致）
+      let j = i; while (j < s.length && s[j] >= '0' && s[j] <= '9') j++;
+      if (s[j] === '√' && s[j + 1] !== '(') { const r = rtRoot(s, j); if (r) { out += '\\(' + s.slice(i, j) + r.tex + '\\)'; i = r.next; continue; } }
+      out += s.slice(i, j); i = j; continue;
+    }
+    if (c === '√') { const r = rtRoot(s, i); if (r) { out += '\\(' + r.tex + '\\)'; i = r.next; continue; } }
+    out += c; i++;
+  }
+  return out;
+}
+function rtRoot(s, i) { // s[i]==='√'；回傳 {tex:'\\sqrt{...}', next} 或 null（後面不是可轉內容→當文字）
+  i++;
+  if (s[i] === '(') { // √(算式)：內層不得含括號/<>（跟舊 regex [^()<>] 一致，避免把含中文標記的複雜式硬塞進 KaTeX）；內層的 √ 仍遞迴轉→支援 √(8+√2)
+    let j = i + 1;
+    for (; j < s.length; j++) { const ch = s[j]; if (ch === ')') break; if (ch === '(' || ch === '<' || ch === '>') return null; }
+    if (j >= s.length || j === i + 1) return null; // 沒有右括號或空括號
+    return { tex: '\\sqrt{' + rtInner(s.slice(i + 1, j)) + '}', next: j + 1 };
+  }
+  let j = i; while (j < s.length && s[j] >= '0' && s[j] <= '9') j++; // √數字（可含一個小數點）
+  if (s[j] === '.' && s[j + 1] >= '0' && s[j + 1] <= '9') { j++; while (j < s.length && s[j] >= '0' && s[j] <= '9') j++; }
+  if (j === i) return null;
+  return { tex: '\\sqrt{' + s.slice(i, j) + '}', next: j };
+}
+function rtInner(s) { // 括號內容：只把 √ 遞迴轉成 \sqrt{}，不再包島
+  let out = '';
+  for (let i = 0; i < s.length;) {
+    if (s[i] === '√') { const r = rtRoot(s, i); if (r) { out += r.tex; i = r.next; continue; } }
+    out += s[i]; i++;
+  }
+  return out;
 }
 /* 方法庫等純文字內的分數轉直式＋根號蓋線（保守：只轉 a/b、√a/b 形式） */
 function mathTxt(s) {
