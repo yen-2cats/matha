@@ -1333,19 +1333,23 @@ const PYTH = [[3,4,5],[6,8,10],[5,12,13],[8,15,17],[7,24,25],[9,12,15]];
 const DRILLS = {
   tri: { name: '三角函數值', desc: '特殊角 sin/cos/tan，看到就要有答案', target: 12,
     gen() {
-      const fn = pick(['sin', 'cos', 'tan']);
-      const angles = Object.keys(TRI_VAL[fn]).map(Number);
-      const a = pick(angles);
-      const correct = TRI_VAL[fn][a];
-      const pool = [...new Set(Object.values(TRI_VAL[fn]))].filter((v) => v !== correct);
+      const cands = [];
+      for (const fn of ['sin', 'cos', 'tan']) for (const a of Object.keys(TRI_VAL[fn])) cands.push({ key: `tri:${fn}:${a}`, fn, a: Number(a) });
+      const c = factPick(cands); // 間隔複習：忘記的優先回鍋、連對的暫時退場
+      const correct = TRI_VAL[c.fn][c.a];
+      const pool = [...new Set(Object.values(TRI_VAL[c.fn]))].filter((v) => v !== correct);
       const opts = shuffle([correct, ...shuffle(pool).slice(0, 3)]);
-      return { q: `${fn} ${a}° = ?`, kind: 'opts', opts: opts.map(mDispOpt), ans: opts.indexOf(correct) };
+      return { q: `${c.fn} ${c.a}° = ?`, kind: 'opts', opts: opts.map(mDispOpt), ans: opts.indexOf(correct), fk: c.key };
     } },
   logexp: { name: '指對數速算', desc: 'log 與分數指數，目標 15 秒內', target: 15,
     gen() {
       const t = rint(1, 3);
       if (t === 1) { const b = pick([2, 3, 5]); const k = rint(2, 5); return { q: `log<sub>${b}</sub>(${b ** k}) = ?`, kind: 'num', ans: String(k) }; }
-      if (t === 2) { const p = pick(POWERS); const [fn, fd] = p[1].split('/'); return { q: `${p[0]}<sup>${fd ? fracH(fn, fd) : p[1]}</sup> = ?`, kind: 'num', ans: String(p[2]) }; }
+      if (t === 2) {
+        const p = factPick(POWERS.map((x) => ({ key: `pow:${x[0]}^${x[1]}`, x }))).x;
+        const [fn, fd] = p[1].split('/');
+        return { q: `${p[0]}<sup>${fd ? fracH(fn, fd) : p[1]}</sup> = ?`, kind: 'num', ans: String(p[2]), fk: `pow:${p[0]}^${p[1]}` };
+      }
       const x = rint(2, 4), y = rint(2, 4);
       return pick([
         { q: `2<sup>${x}</sup> × 2<sup>${y}</sup> = 2<sup>?</sup>`, kind: 'num', ans: String(x + y) },
@@ -1465,9 +1469,10 @@ const DRILLS = {
         [5, 12, '13', ['17', '√17', '13√2']],
         [9, 3, '3√10', ['9√3', '3√3', '27']],
       ];
-      const [x, y, right, wrongs] = pick(cases);
+      const cc = factPick(cases.map((x) => ({ key: `rootc:${x[0]},${x[1]}`, x })));
+      const [x, y, right, wrongs] = cc.x;
       const opts = shuffle([right, ...wrongs]);
-      return { q: `√(${x}² + ${y}²) = ?（距離計算的收尾）`, opts, ans: opts.indexOf(right) };
+      return { q: `√(${x}² + ${y}²) = ?（距離計算的收尾）`, opts, ans: opts.indexOf(right), fk: cc.key };
     } },
   mat2: { name: '2×2 矩陣速算', desc: 'det、面積、矩陣作用——112 起連三年必考的新主角', target: 18,
     gen(maxT) { // maxT=2 → 手機模式只出 det/面積（矩陣作用心算負荷太重）
@@ -1589,7 +1594,7 @@ const FLASH = [
 
 /* 把數值答案的生成題自動變成 4 選 1（手機純按鈕用） */
 function optionize(it) {
-  if (it.opts) return { q: it.q, opts: it.opts, ans: it.ans };
+  if (it.opts) return { q: it.q, opts: it.opts, ans: it.ans, fk: it.fk };
   const s = String(it.ans);
   const alts = new Set();
   const frac = s.match(/^(-?\d+)\/(\d+)$/);
@@ -1609,7 +1614,7 @@ function optionize(it) {
   if (three.length < 3) return null;
   const opts = shuffle([s, ...three]);
   const ai = opts.indexOf(s);
-  return { q: it.q, opts: opts.map(mDispOpt), ans: ai };
+  return { q: it.q, opts: opts.map(mDispOpt), ans: ai, fk: it.fk };
 }
 function phoneLog(ok, ms) {
   S.phone = S.phone || { days: {}, hist: [], cards: {} };
@@ -1649,9 +1654,10 @@ function startPhoneQuiz() {
   // 手機＝純心算：排除餘式定理（f(k) 三項相加太重）；mat2 只出 det/面積；frac 壓小分母
   const keys = ['tri', 'logexp', 'quad', 'cnk', 'dot', 'seqd', 'mul', 'root', 'mat2', 'frac'];
   let guard = 0;
+  const rseen = new Set();
   while (phone.items.length < 12 && guard++ < 100) {
     const k = pick(keys);
-    const o = optionize(genFresh(k, () => (k === 'mat2' ? DRILLS.mat2.gen(2) : k === 'frac' ? DRILLS.frac.gen(1) : DRILLS[k].gen())));
+    const o = optionize(genFresh(k, () => (k === 'mat2' ? DRILLS.mat2.gen(2) : k === 'frac' ? DRILLS.frac.gen(1) : DRILLS[k].gen()), rseen));
     if (o) { o.src = DRILLS[k].name; phone.items.push(o); }
   }
   sessionActive = true;
@@ -1688,6 +1694,7 @@ function phoneTap(idx) {
   if (proc && proc.n) syncInk(`phone-q${phone.i + 1}`, phone.t0, Object.assign({ mode: 'phone', ok }, proc));
   phone.results.push({ ok, ms });
   if (ok) phone.ok++;
+  factResult(it.fk, ok); // 必背事實：更新間隔複習排程
   phoneLog(ok, ms);
   document.querySelectorAll('.pbtn').forEach((b, i) => {
     b.disabled = true;
@@ -1821,22 +1828,58 @@ function renderDrillMenu() {
 }
 
 let drill = null;
-/* 產生器去重：同一 session 內記住最近出過的題面，避免小題池一直撞同數字 */
+/* ═══ 必背事實的間隔複習（Anki 式）═══
+   sin30°=1/2 這類「重要而唯一」的事實：答錯→立即到期、反覆出現直到會；
+   連續答對→間隔翻倍暫時退場（10分→1時→8時→2天→7天→21天）。記憶存 S.facts 跨裝置同步。 */
+const FACT_IVL = [10 * 60e3, 60 * 60e3, 8 * 3600e3, 2 * 86400e3, 7 * 86400e3, 21 * 86400e3];
+let FACT_RECENT = []; // 最近抽過的事實（防同一輪連抽同一個）
+function factPick(cands) {
+  const now = Date.now(), F = S.facts || {};
+  const tier = (c) => {
+    const f = F[c.key];
+    if (!f) return 1;            // 沒看過：次優先
+    return f.due <= now ? 0 : 2; // 到期/剛答錯：最優先；連對未到期：殿後
+  };
+  const avail = cands.filter((c) => !FACT_RECENT.includes(c.key));
+  const pool = avail.length ? avail : cands;
+  let best = null, bs = 9;
+  for (const c of pool) {
+    const s = tier(c) + Math.random() * 0.9;
+    if (s < bs) { bs = s; best = c; }
+  }
+  FACT_RECENT.push(best.key);
+  if (FACT_RECENT.length > 10) FACT_RECENT.shift();
+  return best;
+}
+function factResult(key, ok) {
+  if (!key) return;
+  S.facts = S.facts || {};
+  const f = (S.facts[key] = S.facts[key] || { s: 0, due: 0, last: 0 });
+  if (ok) { f.s = Math.min(f.s + 1, FACT_IVL.length); f.due = Date.now() + FACT_IVL[f.s - 1]; }
+  else { f.s = 0; f.due = 0; } // 答錯：歸零、立即到期
+  f.last = Date.now();
+  save();
+}
+/* 產生器去重：同一輪絕不重題；參數題另外跨輪避重（事實題的跨輪節奏交給間隔複習排程） */
 const QSEEN = {};
-function genFresh(key, genFn) {
-  const seen = (QSEEN[key] = QSEEN[key] || []);
+function genFresh(key, genFn, roundSeen) {
+  const ring = (QSEEN[key] = QSEEN[key] || []);
   let g = null;
   for (let t = 0; t < 15; t++) {
     g = genFn();
     const sig = String(g.q).replace(/<[^>]+>/g, '').replace(/\s+/g, '');
-    if (!seen.includes(sig)) { seen.push(sig); if (seen.length > 40) seen.shift(); return g; }
+    if (roundSeen && roundSeen.has(sig)) continue;
+    if (!g.fk && ring.includes(sig)) continue;
+    if (roundSeen) roundSeen.add(sig);
+    if (!g.fk) { ring.push(sig); if (ring.length > 40) ring.shift(); }
+    return g;
   }
   return g; // 題池真的太小躲不掉時才接受重複
 }
 function startDrill(key) {
   if (!syncGate()) return;
-  drill = { key, items: [], i: 0, results: [], t0: 0, pend: null };
-  for (let i = 0; i < 12; i++) drill.items.push(genFresh(key, () => DRILLS[key].gen()));
+  drill = { key, items: [], i: 0, results: [], t0: 0, pend: null, rseen: new Set() };
+  for (let i = 0; i < 12; i++) drill.items.push(genFresh(key, () => DRILLS[key].gen(), drill.rseen));
   sessionActive = true;
   sessionMode = 'drill';
   drillNext();
@@ -1896,7 +1939,7 @@ function drillSubmit(optIdx) {
   };
   if (ms >= 360000) {
     modal(`<h2>⏸ 這題用了 ${fmtSec(ms)}</h2><p>是不是有中途離開座位？有的話這題不列入本輪，避免污染速度數據。</p>`, [
-      ['有離開，這題不列入', () => { drill.pend = null; drill.lock = false; drill.items[drill.i] = genFresh(drill.key, () => DRILLS[drill.key].gen()); drillNext(); }],
+      ['有離開，這題不列入', () => { drill.pend = null; drill.lock = false; drill.items[drill.i] = genFresh(drill.key, () => DRILLS[drill.key].gen(), drill.rseen); drillNext(); }],
       ['沒有離開，正常記錄', proceed],
     ]);
   } else proceed();
@@ -1912,6 +1955,7 @@ function drillFinish(ok, given, ms, proc) {
   const it = drill.items[drill.i];
   const ansTxt = it.kind === 'num' ? it.ans : it.opts[it.ans];
   if (it.kind === 'num') inkMark(drill.qid, 's', ok, String(it.ans)); // 自評/打字也照樣畫紅筆
+  factResult(it.fk, ok); // 必背事實：更新間隔複習排程（非事實題 fk 為空、自動略過）
   drill.results.push({ ok, ms, q: it.q, ans: ansTxt, given });
   syncInk(drill.qid, drill.t0, Object.assign({ mode: 'drill', ok }, proc || {}));
   const fb = $('#dfb');
@@ -2974,6 +3018,15 @@ function mergeState(a, b) {
       pcards[k] = !y || x.s >= y.s ? x : y;
     }
     merged.phone = { days: pdays, hist: phist.slice(-200), cards: pcards };
+  }
+  // 必背事實的間隔複習記憶：逐事實取「最後作答時間較新」的一方（跨裝置接續複習進度）
+  const fa = a.facts || {}, fb = b.facts || {};
+  if (Object.keys(fa).length || Object.keys(fb).length) {
+    const facts = { ...fb };
+    for (const k of Object.keys(fa)) {
+      if (!facts[k] || (fa[k].last || 0) > (facts[k].last || 0)) facts[k] = fa[k];
+    }
+    merged.facts = facts;
   }
   return merged;
 }
