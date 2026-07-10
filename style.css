@@ -297,6 +297,19 @@ sup .vfrac { font-size: 1em; margin: 0 0.05em; }
 .sol-detail > summary::before { content: '▸ '; color: var(--accent); }
 .sol-detail[open] > summary::before { content: '▾ '; }
 .sol-detail[open] > summary { margin-bottom: 8px; border-bottom: 1px dashed var(--border); }
+/* AI 讀到什麼＋改判：壓成一行不擋路 */
+.rejudge { font-size: 13px; margin: 4px 0 2px; opacity: .82; }
+.rejudge a { color: var(--accent); cursor: pointer; text-decoration: underline; margin-left: 4px; }
+/* 中段唯一那塊（答錯的最簡算法 / 超時的更快做法） */
+.one-method { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; margin: 8px 0; line-height: 1.7; }
+/* AI 像老師一樣把紅圈畫在你的手寫圖上 */
+.ai-marked { margin: 8px 0; }
+.am-wrap { position: relative; display: inline-block; max-width: 100%; width: 480px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #fff; }
+.am-wrap img { display: block; width: 100%; height: auto; }
+.am-circle { position: absolute; border: 2.5px solid #e11d48; border-radius: 50%; box-shadow: 0 0 0 1px rgba(225, 29, 72, .25); pointer-events: none; }
+.am-lab { position: absolute; transform: translateY(-115%); background: #e11d48; color: #fff; font-size: 11px; line-height: 1.25; padding: 1px 5px; border-radius: 4px; white-space: nowrap; pointer-events: none; z-index: 1; }
+.am-lab.below { transform: translateY(3px); } /* 靠上緣的框：標籤改放圈內、不被裁掉 */
+.am-cap { color: #e11d48; font-size: 13px; margin: 5px 0 0; }
 
 /* 🧑‍🏫 老師蒸餾 */
 .teach { background: rgba(15, 118, 110, 0.07); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; padding: 10px 14px; margin: 10px 0; }
