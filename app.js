@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0711l'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0711m'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -1204,7 +1204,7 @@ function dayAgg() {
     for (const h of S.drills[k]) add(h.d, 12, Math.round(12 * (h.acc || 0) / 100), (h.med || 0) * 12, 3); // 速訓一輪=3點
   }
   if (S.phone && S.phone.days) {
-    for (const d of Object.keys(S.phone.days)) { const p = S.phone.days[d]; add(d, p.n, p.ok, p.ms || 0, p.n || 0); } // 手機專區每題算 1 點
+    for (const d of Object.keys(S.phone.days)) { const p = S.phone.days[d]; add(d, p.n || 0, p.ok || 0, p.ms || 0, p.n || 0); } // 手機專區每題算 1 點；全欄位 NaN-proof（防外部污染的 localStorage/雲端列）
   }
   return days;
 }
@@ -3319,9 +3319,10 @@ function mergeState(a, b) {
   const daily = { ...(b.daily || {}) };
   for (const d of Object.keys(a.daily || {})) daily[d] = { ...(daily[d] || {}), ...a.daily[d] };
   // 🎯 類題支線紀錄：兩裝置聯集（以 ts 去重），別讓其中一方蓋掉另一方
-  const spset = new Set((a.sidePractice || []).map((x) => x.ts));
+  const spkey = (x) => `${x.ts}|${x.qid}`; // 含 qid，跟 attempts 一致：同毫秒兩台裝置的類題紀錄不塌成一筆
+  const spset = new Set((a.sidePractice || []).map(spkey));
   const sidePractice = [...(a.sidePractice || [])];
-  for (const x of b.sidePractice || []) if (!spset.has(x.ts)) sidePractice.push(x);
+  for (const x of b.sidePractice || []) if (!spset.has(spkey(x))) sidePractice.push(x);
   const merged = { ...b, ...a, attempts, wrong, drills, mocks, extMocks, daily, extbank, sidePractice };
   // AI key：取「最後修改時間較新」的一方（避免舊裝置的舊 key 蓋掉新換的 key）
   if ((b.aikeyTs || 0) > (a.aikeyTs || 0)) { merged.aikey = b.aikey; merged.aikeyTs = b.aikeyTs; }
