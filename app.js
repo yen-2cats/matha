@@ -130,6 +130,7 @@ function inkStart(qid, t0, since) {
   // 歸檔舊筆跡：同一題再次作答時不重現上次內容（模擬第二輪傳 sessT0 保留第一輪）
   const cut = since != null ? since : t0;
   for (const arr of [st.s, st.q, st.a]) for (const s of arr) if (!s.dead && !s.arch && s.t0 < cut) s.arch = 1;
+  if (st.m) for (const m of st.m) if (!m.arch && m.t < cut) m.arch = 1; // 舊批改標記一起歸檔
   let maxY = 0;
   for (const s of st.s) if (!s.dead && !s.arch) for (const p of s.pts) if (p[1] > maxY) maxY = p[1];
   const base = +cv.dataset.h || 0;
@@ -261,6 +262,57 @@ function inkRedraw(sur) {
   for (const s of inkArr(sur)) if (!s.dead && !s.arch) inkDrawStroke(sur.ctx, s);
   // 進行中的筆畫也要補畫（自動加長重設 canvas 會清空 bitmap）
   if (sur.cur && sur.cur.pts && sur.cur.pts.length > 1) inkDrawStroke(sur.ctx, sur.cur);
+  const st = sessionInk[ink.qid];
+  if (st && st.m) for (const m of st.m) if (!m.arch && m.sur === sur.key) inkDrawMark(sur.ctx, m, sur.cv.clientWidth, sur.cv.clientHeight);
+}
+/* ═══ 批改標記：對→紅勾畫在答案旁、錯→紅叉＋正解寫在下面（像老師改考卷） ═══ */
+function inkMark(qid, surKey, ok, ansText) {
+  const st = sessionInk[qid]; if (!st) return;
+  const arr = ((surKey === 'q' ? st.q : st.s) || []).filter((s) => !s.dead && !s.arch);
+  if (!arr.length) return;
+  const last = arr.reduce((a, b) => ((b.t1 || b.t0) > (a.t1 || a.t0) ? b : a));
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const p of last.pts) {
+    if (p[0] < x0) x0 = p[0]; if (p[1] < y0) y0 = p[1];
+    if (p[0] > x1) x1 = p[0]; if (p[1] > y1) y1 = p[1];
+  }
+  const cv = surKey === 'q' ? $('#qink-cv') : $('#ink-cv');
+  if (!cv) return;
+  const m = { t: Date.now(), sur: surKey, ok: !!ok, txt: ok ? null : `正解：${ansText}`, x0, y0, x1, y1 };
+  (st.m = st.m || []).push(m);
+  inkDrawMark(cv.getContext('2d'), m, cv.clientWidth, cv.clientHeight);
+}
+function inkDrawMark(ctx, m, cw, ch) {
+  ctx.save();
+  ctx.strokeStyle = INK_COLORS.r; ctx.fillStyle = INK_COLORS.r;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const cy = (m.y0 + m.y1) / 2;
+  const size = m.ok ? 26 : 18;
+  let bx = m.x1 + 12;
+  if (bx + size > cw) bx = Math.max(4, m.x0 - size - 12);
+  if (m.ok) {
+    ctx.lineWidth = 3.2;
+    ctx.beginPath();
+    ctx.moveTo(bx, cy + size * 0.05);
+    ctx.lineTo(bx + size * 0.32, cy + size * 0.4);
+    ctx.lineTo(bx + size, cy - size * 0.45);
+    ctx.stroke();
+  } else {
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(bx, cy - size / 2); ctx.lineTo(bx + size, cy + size / 2);
+    ctx.moveTo(bx + size, cy - size / 2); ctx.lineTo(bx, cy + size / 2);
+    ctx.stroke();
+    let fs = 20;
+    ctx.font = `600 ${fs}px system-ui, sans-serif`;
+    let tw = ctx.measureText(m.txt).width;
+    while (tw > cw - 12 && fs > 13) { fs -= 2; ctx.font = `600 ${fs}px system-ui, sans-serif`; tw = ctx.measureText(m.txt).width; }
+    let tx = m.x0, ty = m.y1 + fs + 12;
+    if (tx + tw > cw - 6) tx = Math.max(6, cw - 6 - tw);
+    if (ty > ch - 6) ty = Math.max(fs + 6, m.y0 - 12);
+    ctx.fillText(m.txt, tx, ty);
+  }
+  ctx.restore();
 }
 function inkRedrawAll() {
   if (!ink) return;
@@ -1196,13 +1248,13 @@ const DRILLS = {
       const correct = TRI_VAL[fn][a];
       const pool = [...new Set(Object.values(TRI_VAL[fn]))].filter((v) => v !== correct);
       const opts = shuffle([correct, ...shuffle(pool).slice(0, 3)]);
-      return { q: `${fn} ${a}° = ?`, kind: 'opts', opts, ans: opts.indexOf(correct) };
+      return { q: `${fn} ${a}° = ?`, kind: 'opts', opts: opts.map(mDispOpt), ans: opts.indexOf(correct) };
     } },
   logexp: { name: '指對數速算', desc: 'log 與分數指數，目標 15 秒內', target: 15,
     gen() {
       const t = rint(1, 3);
       if (t === 1) { const b = pick([2, 3, 5]); const k = rint(2, 5); return { q: `log<sub>${b}</sub>(${b ** k}) = ?`, kind: 'num', ans: String(k) }; }
-      if (t === 2) { const p = pick(POWERS); return { q: `${p[0]}<sup>${p[1]}</sup> = ?`, kind: 'num', ans: String(p[2]) }; }
+      if (t === 2) { const p = pick(POWERS); const [fn, fd] = p[1].split('/'); return { q: `${p[0]}<sup>${fd ? fracH(fn, fd) : p[1]}</sup> = ?`, kind: 'num', ans: String(p[2]) }; }
       const x = rint(2, 4), y = rint(2, 4);
       return pick([
         { q: `2<sup>${x}</sup> × 2<sup>${y}</sup> = 2<sup>?</sup>`, kind: 'num', ans: String(x + y) },
@@ -1229,11 +1281,11 @@ const DRILLS = {
       if (Math.random() < 0.6) {
         const n = rint(5, 10), k = rint(2, 4);
         let v = 1; for (let i = 0; i < k; i++) v = v * (n - i) / (i + 1);
-        return { q: `C(${n}, ${k}) = ?`, kind: 'num', ans: String(Math.round(v)) };
+        return { q: `${cpH('C', n, k)} = ?`, kind: 'num', ans: String(Math.round(v)) };
       }
       const n = rint(4, 8), k = rint(2, 3);
       let v = 1; for (let i = 0; i < k; i++) v *= (n - i);
-      return { q: `P(${n}, ${k}) = ?`, kind: 'num', ans: String(v) };
+      return { q: `${cpH('P', n, k)} = ?`, kind: 'num', ans: String(v) };
     } },
   dot: { name: '向量內積與長度', desc: '內積、畢氏長度，全部心算', target: 15,
     gen() {
@@ -1285,12 +1337,12 @@ const DRILLS = {
       const a = rint(1, cap - 1), b = rint(2, cap), c = rint(1, cap - 1), d = rint(2, cap);
       if (t === 1) {
         const plus = Math.random() < 0.5;
-        return { q: `${a}/${b} ${plus ? '+' : '−'} ${c}/${d} = ?（最簡分數）`, kind: 'num', ans: red(plus ? a * d + c * b : a * d - c * b, b * d) };
+        return { q: `${fracH(a, b)} ${plus ? '+' : '−'} ${fracH(c, d)} = ?（最簡分數）`, kind: 'num', ans: red(plus ? a * d + c * b : a * d - c * b, b * d) };
       }
-      if (t === 2) return { q: `${a}/${b} × ${c}/${d} = ?（最簡分數）`, kind: 'num', ans: red(a * c, b * d) };
-      if (t === 3) return { q: `(${a}/${b}) ÷ (${c}/${d}) = ?（最簡分數）`, kind: 'num', ans: red(a * d, b * c) };
+      if (t === 2) return { q: `${fracH(a, b)} × ${fracH(c, d)} = ?（最簡分數）`, kind: 'num', ans: red(a * c, b * d) };
+      if (t === 3) return { q: `${fracH(a, b)} ÷ ${fracH(c, d)} = ?（最簡分數）`, kind: 'num', ans: red(a * d, b * c) };
       const k = rint(2, easy ? 4 : 6), p = rint(2, easy ? 7 : 9), q2 = rint(p + 1, easy ? 9 : 12);
-      return { q: `約分到最簡：${p * k}/${q2 * k} = ?`, kind: 'num', ans: red(p, q2) };
+      return { q: `約分到最簡：${fracH(p * k, q2 * k)} = ?`, kind: 'num', ans: red(p, q2) };
     } },
   root: { name: '根式化簡', desc: '√48 要一眼變 4√3——所有距離、長度計算的收尾動作', target: 12,
     gen() {
@@ -1306,7 +1358,8 @@ const DRILLS = {
         const right = tt === 1 ? `√${b}` : `${tt}√${b}`;
         const cand = [right, `${tt}/√${b}`, `${tt * b}√${b}`, `${tt + 1}√${b}`, `${tt + 2}√${b}`, `${tt * b}/√${b}`];
         const opts = shuffle([...new Set(cand)].slice(0, 4));
-        return { q: `有理化：${tt * b}/√${b} = ?`, opts, ans: opts.indexOf(right) };
+        const ai = opts.indexOf(right);
+        return { q: `有理化：${fracH(tt * b, '√' + b)} = ?`, opts: opts.map(mDispOpt), ans: ai };
       }
       // 距離計算收尾：√(x²+y²)
       const cases = [
@@ -1350,6 +1403,14 @@ const DRILLS = {
 /* 2×2 直式呈現：det=true 用行列式直線，否則用矩陣方括號（CSS .m2 畫框） */
 function m2H(a, b, c, d, det) {
   return `<span class="m2${det ? ' det' : ''}"><span>${a}</span><span>${b}</span><span>${c}</span><span>${d}</span></span>`;
+}
+/* 直式數學排版（顯示用；答案輸入格式維持 a/b 不變） */
+function fracH(n, d) { return `<span class="vfrac"><span class="vn">${n}</span><span class="vd">${d}</span></span>`; }
+function cpH(L, n, k) { return `<span class="cpk">${L}<span class="ss"><span>${n}</span><span>${k}</span></span></span>`; }
+/* 選項/正解顯示轉直式：只轉「整串就是一個分數」的安全情形，如 1/2、-√3/2、11/72、3/√5 */
+function mDispOpt(s) {
+  const m = typeof s === 'string' && s.match(/^(-?(?:\d+)?(?:√\d+)?)\/((?:\d+)?(?:√\d+)?)$/);
+  return m && m[1] && m[2] ? fracH(m[1], m[2]) : s;
 }
 
 /* ═══════════ 📱 手機專區 ═══════════
@@ -1456,7 +1517,8 @@ function optionize(it) {
   const three = shuffle([...alts]).slice(0, 3);
   if (three.length < 3) return null;
   const opts = shuffle([s, ...three]);
-  return { q: it.q, opts, ans: opts.indexOf(s) };
+  const ai = opts.indexOf(s);
+  return { q: it.q, opts: opts.map(mDispOpt), ans: ai };
 }
 function phoneLog(ok, ms) {
   S.phone = S.phone || { days: {}, hist: [], cards: {} };
@@ -1724,7 +1786,7 @@ function drillSubmit(optIdx) {
     if (typed) { drillFinish(checkFill(typed, [it.ans]), typed, ms, proc); return; }
     // 手寫作答：秀正解 → 自評對錯（不需要鍵盤）
     drill.pend = { ms, proc };
-    $('#dfb').innerHTML = `<div class="judge-box"><p>正解：<b class="big accent">${it.ans}</b>　對照你答案區寫的——一樣嗎？</p>
+    $('#dfb').innerHTML = `<div class="judge-box"><p>正解：<b class="big accent">${mDispOpt(String(it.ans))}</b>　對照你答案區寫的——一樣嗎？</p>
       <div class="actr"><button class="btn err" onclick="drillJudge(false)">✗ 我錯了</button>
       <button class="btn primary" onclick="drillJudge(true)">✓ 我對了</button></div></div>`;
   };
@@ -1745,6 +1807,7 @@ function drillJudge(ok) {
 function drillFinish(ok, given, ms, proc) {
   const it = drill.items[drill.i];
   const ansTxt = it.kind === 'num' ? it.ans : it.opts[it.ans];
+  if (it.kind === 'num') inkMark(drill.qid, 's', ok, String(it.ans)); // 自評/打字也照樣畫紅筆
   drill.results.push({ ok, ms, q: it.q, ans: ansTxt, given });
   syncInk(drill.qid, drill.t0, Object.assign({ mode: 'drill', ok }, proc || {}));
   const fb = $('#dfb');
@@ -1753,7 +1816,7 @@ function drillFinish(ok, given, ms, proc) {
     drill.i++;
     drill.nextTimer = setTimeout(drillNext, 500); // endSession 會清掉，避免退出後殭屍題復活
   } else {
-    fb.innerHTML = `<p class="bad">✘ 錯了，正確答案：<b>${ansTxt}</b></p>
+    fb.innerHTML = `<p class="bad">✘ 錯了，正確答案：<b>${mDispOpt(String(ansTxt))}</b></p>
       <div class="actr"><button class="btn primary" onclick="drill.i++;drillNext()">下一題</button></div>`;
   }
 }
@@ -1949,10 +2012,10 @@ function renderQuestion(q, cfg) {
   let ansUI;
   if (q.type === 'single') {
     ansUI = q.opts.map((o, i) =>
-      `<button class="btn opt block" onclick="qSubmit(${i})">(${i + 1}) ${o}</button>`).join('');
+      `<button class="btn opt block" onclick="qSubmit(${i})">(${i + 1}) ${mDispOpt(o)}</button>`).join('');
   } else if (q.type === 'multi') {
     ansUI = q.opts.map((o, i) =>
-      `<label class="opt block check"><input type="checkbox" value="${i}"> (${i + 1}) ${o}</label>`).join('')
+      `<label class="opt block check"><input type="checkbox" value="${i}"> (${i + 1}) ${mDispOpt(o)}</label>`).join('')
       + `<div class="actr"><button class="btn primary" onclick="qSubmit()">送出（多選）</button></div>`;
   } else {
     ansUI = `<p class="dim">✍️ 在下方計算區作答，<b>最終答案寫在最後</b>，寫完按：</p>
@@ -2018,7 +2081,9 @@ function qGrade(optIdx) {
   if (typed) { qsess.yourAns = typed; qResolve(checkFill(typed, q.ans)); return; }
   qsess.yourAns = '（手寫作答）';
   // 計算區優先；空白就抓題目區的筆跡（在圖上標註、旁邊直接算的人也要能批改）
-  const calcB64 = inkCapture(q.id, 's') || inkCapture(q.id, 'q');
+  const calcS = inkCapture(q.id, 's');
+  const calcB64 = calcS || inkCapture(q.id, 'q');
+  qsess.capSur = calcS ? 's' : 'q'; // 批改標記要畫在被批改的那一面
   if (aiKey() && calcB64) {
     $('#qfb').innerHTML = '<p class="dim">🤖 AI 批改中…（認字、對答案、檢查過程哪裡開始錯）</p>';
     const sess = qsess; // 綁定本題：離開或換題後，遲到的回應直接丟棄
@@ -2033,12 +2098,13 @@ function qGrade(optIdx) {
 function qShowJudge(hasAI) {
   const { q } = qsess;
   const v = qsess.ai;
-  const peek = `<div class="sol"><p>正解：<b class="big">${q.ans[0]}</b></p></div>`;
+  const peek = `<div class="sol"><p>正解：<b class="big">${mDispOpt(String(q.ans[0]))}</b></p></div>`;
   if (hasAI && v) {
     $('#qfb').innerHTML = `${aiFeedbackHTML(v)}${peek}
       <p class="dim">AI 判得對就繼續；判錯了可以改判。</p>
       <div class="actr"><button class="btn" onclick="qResolve(${!v.correct})">改判：其實我${v.correct ? '錯了' : '對了'}</button>
       <button class="btn primary" onclick="qResolve(${!!v.correct})">${v.correct ? '✓ 沒錯，我答對了' : '✗ 對，我答錯了'}——繼續</button></div>`;
+    inkMark(q.id, qsess.capSur || 's', !!v.correct, String(q.ans[0])); // 像老師改考卷：直接畫在手寫上
   } else {
     const noKeyHint = !qsess.aiErr && !aiKey() && supa && syncState.user
       ? '<p class="warnc">⚠ 這台裝置還沒拿到 AI key——如果你已在別台填過，重新整理此頁同步後就會自動批改。</p>' : '';
@@ -2172,9 +2238,9 @@ function mockQ() {
   mock.qlock = false;
   let ansUI;
   if (q.type === 'single') {
-    ansUI = q.opts.map((o, i) => `<button class="btn opt block" onclick="mockAns(${i})">(${i + 1}) ${o}</button>`).join('');
+    ansUI = q.opts.map((o, i) => `<button class="btn opt block" onclick="mockAns(${i})">(${i + 1}) ${mDispOpt(o)}</button>`).join('');
   } else if (q.type === 'multi') {
-    ansUI = q.opts.map((o, i) => `<label class="opt block check"><input type="checkbox" value="${i}"> (${i + 1}) ${o}</label>`).join('')
+    ansUI = q.opts.map((o, i) => `<label class="opt block check"><input type="checkbox" value="${i}"> (${i + 1}) ${mDispOpt(o)}</label>`).join('')
       + `<div class="actr"><button class="btn primary" onclick="mockAns()">送出此題</button></div>`;
   } else {
     ansUI = `<p class="dim">✍️ 在下方計算區作答，<b>最終答案寫在最後</b>，寫完按：</p>
