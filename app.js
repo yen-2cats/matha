@@ -1443,16 +1443,17 @@ const DRILLS = {
   logexp: { name: '指對數速算', desc: 'log 與分數指數', target: 9,
     gen() {
       const t = rint(1, 3);
-      if (t === 1) { const b = pick([2, 3, 5]); const k = rint(2, 5); return { q: `log<sub>${b}</sub>(${b ** k}) = ?`, kind: 'num', ans: String(k) }; }
+      if (t === 1) { const b = pick([2, 3, 5]); const k = rint(2, 5); return { q: T('\\log_{' + b + '}(' + (b ** k) + ')') + ' = ?', kind: 'num', ans: String(k) }; }
       if (t === 2) {
         const p = factPick(POWERS.map((x) => ({ key: `pow:${x[0]}^${x[1]}`, x }))).x;
         const [fn, fd] = p[1].split('/');
-        return { q: `${p[0]}<sup>${fd ? fracH(fn, fd) : p[1]}</sup> = ?`, kind: 'num', ans: String(p[2]), fk: `pow:${p[0]}^${p[1]}` };
+        const exp = fd ? '\\frac{' + fn + '}{' + fd + '}' : p[1]; // 指數裡的分數 → 正式上下疊
+        return { q: T(p[0] + '^{' + exp + '}') + ' = ?', kind: 'num', ans: String(p[2]), fk: `pow:${p[0]}^${p[1]}` };
       }
       const x = rint(2, 4), y = rint(2, 4);
       return pick([
-        { q: `2<sup>${x}</sup> × 2<sup>${y}</sup> = 2<sup>?</sup>`, kind: 'num', ans: String(x + y) },
-        { q: `(2<sup>${x}</sup>)<sup>${y}</sup> = 2<sup>?</sup>`, kind: 'num', ans: String(x * y) },
+        { q: T('2^{' + x + '}\\times 2^{' + y + '}=2^{?}'), kind: 'num', ans: String(x + y) },
+        { q: T('(2^{' + x + '})^{' + y + '}=2^{?}'), kind: 'num', ans: String(x * y) },
       ]);
     } },
   quad: { name: '二次函數最小值', desc: 'y = x²+bx+c 直接讀出最小值', target: 12,
