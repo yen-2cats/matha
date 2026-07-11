@@ -70,3 +70,24 @@ create policy "own methods" on public.teacher_methods
 
 create index if not exists teacher_methods_user_unit
   on public.teacher_methods (user_id, unit);
+
+-- ── 內容包（題庫/重點/公式卡）：與作答狀態分家，匯入才上傳、不再隨每次作答整包同步 ──
+-- （app 會自動偵測本表：存在→啟用分家並遷移；不存在→維持舊行為，隨時可補跑）
+create table if not exists public.content_packs (
+  user_id    uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  pack_id    text not null,
+  kind       text not null,             -- qpack | notes | flash
+  name       text,
+  rev        bigint not null default 1, -- 每次匯入遞增，跨裝置比對用
+  items      jsonb not null,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, pack_id)
+);
+
+alter table public.content_packs enable row level security;
+
+drop policy if exists "own packs" on public.content_packs;
+create policy "own packs" on public.content_packs
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
