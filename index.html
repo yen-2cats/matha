@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="color-scheme" content="light">
-  <meta name="theme-color" content="#0d9488">
+  <meta name="theme-color" content="#0f766e">
   <title>數A特訓</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png?v=4">
@@ -21,10 +21,9 @@
   <script src="bank.js"></script>
   <script src="app.js"></script>
   <script>
-    // 這個新站「不裝」Service Worker——永遠直連最新版，徹底根絕快取鬼打牆。
-    // 保險：若這個路徑曾被舊 SW 註冊過，主動反註冊掉。
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister())).catch(() => {});
+    // PWA：正式站註冊 service worker（artifact/file 環境會靜默跳過）
+    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
     }
   </script>
 </body>
