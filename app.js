@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0712a'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0712b'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -98,7 +98,7 @@ function importQPack(items, name) {
   const st = unionById.last || {};
   if (!save()) { alert('本機儲存空間已滿，這包沒有存下來——先匯出備份或清理空間再試。'); return; }
   if (bad.length) console.table(bad);
-  alert(`完成：新增 ${st.added || 0} 題、更新 ${st.updated || 0} 題、略過 ${st.skipped || 0} 題（版本相同）${bad.length ? `。被擋下 ${bad.length} 題（清單見主控台）` : ''}。外部題庫共 ${S.extbank.length} 題。`);
+  alert(`完成：新增 ${st.added || 0} 題、更新 ${st.updated || 0} 題、略過 ${st.skipped || 0} 題（版本相同）。外部題庫共 ${S.extbank.length} 題。${bad.length ? `\n\n被擋下 ${bad.length} 題：\n${bad.slice(0, 5).join('\n')}${bad.length > 5 ? `\n…其餘見主控台` : ''}` : ''}`);
   location.reload();
 }
 function importData(input) {
@@ -108,6 +108,7 @@ function importData(input) {
     try {
       const d = JSON.parse(r.result);
       // 內容信封 v2：{kind:'qpack'|'flash'|'notes', name, items:[…]}
+      if (d && d.kind && !Array.isArray(d.items)) { alert(`內容包格式不對：items 必須是陣列（kind=${escH(String(d.kind))}）。`); return; }
       if (d && d.kind && Array.isArray(d.items)) {
         if (d.kind === 'qpack') { importQPack(d.items, d.name); return; }
         if (d.kind === 'flash') {
@@ -150,10 +151,10 @@ function importData(input) {
   input.value = '';
 }
 function backupCard() {
-  return `<div class="card"><h2>💾 資料備份</h2>
-    <p class="dim">雲端同步就是主備份；這裡是額外的離線副本。</p>
+  return `<div class="card"><h2>💾 資料備份與匯入</h2>
+    <p class="dim">雲端同步就是主備份；這裡是額外的離線副本。「匯入」也吃<b>題包／重點包／公式卡包</b>（qpack / notes / flash 格式的 .json）。</p>
     <div class="actr"><button class="btn" onclick="exportData()">匯出備份（.json）</button>
-    <button class="btn" onclick="$('#impfile').click()">匯入備份</button>
+    <button class="btn" onclick="$('#impfile').click()">匯入備份 / 內容包</button>
     <button class="btn" onclick="exportInk()">匯出今日筆跡</button></div>
     <input type="file" id="impfile" accept=".json,application/json" style="display:none" onchange="importData(this)">
   </div>`;
@@ -688,6 +689,7 @@ async function inkReplay(qid, t0, jumpMs) {
     }
     inkWipe(cv, ctx);
     for (const a of aliveAt(Date.now())) inkDrawStroke(ctx, a);
+    await sleep(1200); // 完整畫面停留一下再收——筆畫少的回放幾秒就播完，瞬間收合會像沒發生過
   } finally { // 任何中止點都要收乾淨：解鎖、把整卡書寫層收回、關字幕
     replaying = false;
     if (card && card.isConnected) card.classList.remove('replaying');
@@ -1485,8 +1487,18 @@ function startPracAuto() {
   pracNext();
 }
 function startDaily() {
-  dailyFlow = { stage: 0 };
-  dailyNext();
+  // 先給看得見的菜單再開火：不然「菜單」二字點下去直接進第 1 題像被突襲
+  const dp = dailyPick();
+  const due = dueWrong().length;
+  const atk = attackList().slice(0, 3).map((a) => TOPICS[a.k]).join('、');
+  modal(`<h2>▶ 今日菜單</h2><ol style="margin:8px 0 0 20px">
+      <li>⚡ 速訓：<b>${DRILLS[dp.key].name}</b> 12 題<span class="dim">（${dp.why}；幕後計時）</span></li>
+      <li>📓 到期錯題 <b>${due}</b> 題${due ? '' : '<span class="dim">（今天沒有，自動跳過）</span>'}</li>
+      <li>🎯 弱項刷題 8 題<span class="dim">（${atk || '全範圍'}）</span></li>
+    </ol><p class="dim">每段結束自動接下一段；中途 ✕ 可退出。</p>`, [
+    ['開始 →', () => { dailyFlow = { stage: 0 }; dailyNext(); }, 'primary'],
+    ['先不要', null],
+  ]);
 }
 function dailyNext() {
   if (!dailyFlow) return;
@@ -1618,11 +1630,12 @@ function milestoneCard() {
   const totalMin = Math.round(Object.values(days).reduce((x, y) => x + y.ms, 0) / 60000);
   const bestMock = S.mocks.length ? Math.max(...S.mocks.map((m) => m.acc)) : null;
   if (!autoN && !grads && !maxStreak && !totalMin) return '';
+  const timeStr = totalMin >= 90 ? `${Math.floor(totalMin / 60)} 時 ${totalMin % 60} 分` : `${totalMin} 分`; // 與每日投入卡同一種讀法，別讓人拿計算機對單位
   return `<div class="card"><h2>🏅 里程碑</h2><div class="mstones">
     <div class="ms"><b>${autoN}<span class="dim">/12</span></b><span>速訓自動化</span></div>
     <div class="ms"><b>${grads}</b><span>錯題畢業</span></div>
     <div class="ms"><b>${maxStreak}<span class="dim"> 天</span></b><span>最長連續${cur && cur === maxStreak ? '（進行中🔥）' : ''}</span></div>
-    <div class="ms"><b>${totalMin >= 90 ? (totalMin / 60).toFixed(1) + '<span class="dim"> 小時</span>' : totalMin + '<span class="dim"> 分</span>'}</b><span>累計投入</span></div>
+    <div class="ms"><b>${timeStr}</b><span>累計投入</span></div>
     <div class="ms"><b>${bestMock != null ? Math.round(bestMock * 100) + '<span class="dim">%</span>' : '—'}</b><span>模擬最佳</span></div>
   </div></div>`;
 }
@@ -1644,7 +1657,7 @@ function dailyCard() {
   if (w0 > 0 && w1 > w0) cheers.push(`📈 近 7 天 ${w1} 點，比前 7 天多 <b>${Math.round(100 * (w1 - w0) / w0)}%</b>`);
   else if (w0 > 0 && w1 > 0 && w1 < w0) cheers.push(`近 7 天 ${w1} 點、前 7 天 ${w0} 點——再 <b>${w0 - w1 + 1}</b> 點就超車自己`);
   return `<div class="card"><h2>📈 每日投入（近 14 天）</h2>
-    <div class="today-row"><span>🔥 連續 <b>${streak}</b> 天</span><span>今日 <b>${tn}</b> / ${DAY_GOAL} 題</span><span class="dim">累計投入約 ${totalMin} 分鐘</span></div>
+    <div class="today-row"><span>🔥 連續 <b>${streak}</b> 天</span><span>今日 <b>${tn}</b> / ${DAY_GOAL} 點</span><span class="dim">累計投入約 ${totalMin} 分鐘</span></div>
     <div class="goalbar"><div style="width:${Math.min(100, Math.round(100 * tn / DAY_GOAL))}%"></div></div>
     <div class="chartwrap">${dailyChartSVG(days)}</div>
     ${cheers.length ? `<div class="praise">${cheers.join('<br>')}</div>` : '<p class="dim">連續執行一兩週，這裡就會長出你的趨勢線——目標是讓長條圖不斷檔。</p>'}
@@ -1666,8 +1679,8 @@ function todayCard() {
   const hint = mockDueHint();
   return `<div class="card"><div class="today-row">
       ${streakLine}
-      <span class="shr"><button class="btn" onclick="nav('phone')">📱 零碎</button>
-      <button class="btn" onclick="startPomo()">🍅 只有 25 分</button>
+      <span class="shr"><button class="btn" onclick="nav('phone')">📱 零碎時間</button>
+      <button class="btn" onclick="startPomo()">🍅 只有 25 分鐘？</button>
       <button class="btn primary" onclick="startDaily()">▶ 今日菜單</button></span>
     </div>
     <div class="goalbar${goalDone ? ' done' : ''}"><div style="width:${Math.min(100, Math.round(100 * tn / DAY_GOAL))}%"></div></div>
@@ -1781,7 +1794,9 @@ function endSession() {
 }
 /* 中途退出：讓飼主自己選「已作答的要不要留紀錄」，不預設丟掉 */
 function exitFlow(view) {
-  const goto = view || 'home';
+  // 誤觸離開後回到出發的入口頁，不要一律丟回首頁（想馬上重來一輪不用重新導航）
+  const backTo = { drill: 'drill', phone: 'phone', wflash: 'wrong', prac: 'prac', review: 'wrong' };
+  const goto = view || backTo[sessionMode] || 'home';
   if (!sessionActive) { nav(goto); return; }
   // 開著確認框的時間不算作答時間：按「繼續」時把計時起點往後平移
   const pausedAt = Date.now();
@@ -1795,6 +1810,7 @@ function exitFlow(view) {
     else if (sessionMode === 'drill' && drill) drill.t0 += d;
     else if (sessionMode === 'phone' && phone) phone.t0 += d;
     else if (qsess) qsess.t0 += d;
+    if (ink) ink.t0 += d; // 書寫時間軸一起平移：否則暫停後 fi/停頓/卡點秒數會跟耗時對不上
     if (lastTickerFn) startTicker(lastTickerFn); // 恢復碼錶顯示
     if (drillTimerWas && drill && sessionMode === 'drill') drill.nextTimer = setTimeout(drillNext, 500); // 恢復待跳的下一題
     if (phoneTimerWas && phone && sessionMode === 'phone') phone.nextTimer = setTimeout(() => { if (phone && sessionMode === 'phone') { phone.i++; phoneQuizNext(); } }, 450);
@@ -1826,8 +1842,13 @@ function exitFlow(view) {
     ]);
     return;
   }
-  // drill / 手機專區：整輪結果尚未寫入，離開即不保留本輪
-  modal('<h2>要中途離開嗎？</h2><p>這一輪還沒結束，離開不會保留本輪成績。</p>', [
+  // drill / 手機專區 / 衝刺複習：整輪結果尚未寫入，離開即不保留本輪
+  const leaveMsg = sessionMode === 'drill'
+    ? '<h2>要中途離開嗎？</h2><p>離開＝本輪 12 題成績<b>全部作廢</b>（已答的也不算）。</p>'
+    : sessionMode === 'wflash'
+      ? '<h2>要中途離開嗎？</h2><p>衝刺複習不留紀錄，隨時可以再開。</p>'
+      : '<h2>要中途離開嗎？</h2><p>這一輪還沒結束，離開不會保留本輪成績。</p>';
+  modal(leaveMsg, [
     ['繼續', resume, 'primary'],
     ['離開', () => { endSession(); nav(goto); }],
   ]);
@@ -1889,17 +1910,17 @@ function renderHome() {
       <p><b>體感級分：${gradeOf(acc)}</b> <span class="dim">（近 ${recent.length} 題 ${(acc * 100).toFixed(0)}%）</span>${trend}</p>
       ${gradeLadder(acc)}
       ${goalAcc
-        ? `<p class="fs13 dim">距 ${goalAcc === 0.78 ? '14 級（80% 進攻線）' : '13 級門檻（72%）'}差 ${Math.max(1, Math.round((goalAcc - acc) * 100))} 個百分點 ≈ 近 30 題再多對 <b>${Math.max(1, Math.ceil((goalAcc - acc) * 30))}</b> 題</p>`
+        ? `<p class="fs13 dim">距 ${goalAcc === 0.78 ? '14 級門檻（78%）' : '13 級門檻（72%）'}差 ${Math.max(1, Math.round((goalAcc - acc) * 100))} 個百分點 ≈ 近 30 題再多對 <b>${Math.max(1, Math.ceil((goalAcc - acc) * 30))}</b> 題</p>`
         : '<p class="fs13 okc">已站上 14 級線——用錯題本與模擬把它釘穩。</p>'}
     </div>`;
   }
+  const fresh = mocks === 0 && attempts < 10; // 零數據新手：摸底卡放最頂、最大聲
   app().innerHTML = `
   <div class="hero">
     <h1>數A特訓 <span class="dim" style="font-size:12px">${APP_VER}</span></h1>
     <p>距離 116 學測還有 <b class="accent">${days} 天</b></p>
   </div>
-  ${todayCard()}
-  ${status}
+  ${fresh ? status + todayCard() : todayCard() + status}
   ${masteryMap()}
   ${homeInsights()}
   ${teachProfileCard()}
@@ -2228,7 +2249,7 @@ function renderPhone() {
         <p class="dim">${FLASH.length + (S.extflash || []).length} 張，忘過的更常出現。</p>
         <button class="btn primary" onclick="startPhoneFlash('formula')">抽 10 張</button></div>
       <div class="card drill-card"><b>🧑‍🏫 老師口訣卡</b>
-        <p class="dim">1500+ 條老師口訣。</p>
+        <p class="dim">1500+ 條老師口訣。${supa && !syncState.user ? '<b class="warnc">需登入才能載入</b>' : ''}</p>
         <button class="btn primary" onclick="startPhoneFlash('mn')">抽 10 張</button></div>
     </div>
     ${p ? `<div class="card"><p>📅 今日手機練：<b>${p.n}</b> 題/卡｜答對/記得 <b>${p.ok}</b>（${p.n ? Math.round(100 * p.ok / p.n) : 0}%）</p></div>` : ''}
@@ -2280,7 +2301,7 @@ function phoneTap(idx) {
   const ok = idx === it.ans;
   const proc = inkStop(); // 筆記區不批改，但有寫就留數據
   if (proc && proc.n) syncInk(`phone-q${phone.i + 1}`, phone.t0, Object.assign({ mode: 'phone', ok }, proc));
-  phone.results.push({ ok, ms });
+  phone.results.push({ ok, ms, q: it.q, given: it.opts[idx], ans: it.opts[it.ans] }); // 留題目與答案：結算頁要能回顧錯題
   if (ok) phone.ok++;
   factResult(it.fk, ok); // 必背事實：更新間隔複習排程
   phoneLog(ok, ms);
@@ -2291,7 +2312,7 @@ function phoneTap(idx) {
   });
   const fb = $('#pfb');
   if (ok) {
-    fb.innerHTML = `<p class="ok">✔（${(ms / 1000).toFixed(1)}s）</p>`;
+    fb.innerHTML = `<p class="ok">✔（本題 ${(ms / 1000).toFixed(1)}s）</p>`;
     phone.nextTimer = setTimeout(() => { if (phone && sessionMode === 'phone') { phone.i++; phoneQuizNext(); } }, 450);
   } else {
     fb.innerHTML = `<p class="bad">✘ 正解：<b>${mDispOpt(it.opts[it.ans])}</b></p>
@@ -2312,6 +2333,7 @@ function phoneQuizDone() {
   const acc = n ? Math.round(100 * phone.ok / n) : 0;
   const record = acc === 100 && bestMed != null && med < bestMed;
   const better = prevQ && prevQ.n && (phone.ok / n) > (prevQ.ok / prevQ.n);
+  const wrongList = phone.results.filter((r) => !r.ok && r.q);
   app().innerHTML = `<h1>心算快答 — 結果</h1>
     ${goalCrossBanner()}
     <div class="card ${acc === 100 ? 'good' : ''}">
@@ -2321,7 +2343,9 @@ function phoneQuizDone() {
       ${acc === 100 ? '<p class="praise">🎉 全對——這些基本運算正在變成反射！</p>' : acc >= 80 ? '<p class="praise">🎉 手感不錯，錯的那幾題就是還沒自動化的位置。</p>' : ''}
       <div class="actr"><button class="btn" onclick="nav('phone')">回手機專區</button>
       <button class="btn primary" onclick="startPhoneQuiz()">再來 12 題</button></div>
-    </div>`;
+    </div>
+    ${wrongList.length ? `<div class="card warn"><h2>✘ 這輪錯的 ${wrongList.length} 題——下車前看一眼</h2>
+      <ul>${wrongList.map((r) => `<li>${rtTxt(r.q)}　你答 <span class="badc">${mDispOpt(r.given)}</span>，正解 <b>${mDispOpt(r.ans)}</b></li>`).join('')}</ul></div>` : ''}`;
 }
 function startPhoneFlash(kind) {
   if (!syncGate()) return;
@@ -2516,7 +2540,7 @@ function drillNext() {
   // 統一計算紙：題目 → 批改槽 → 一張書寫畫布 → 按鈕（速訓不加 :has 收合，自評時要看得到自己寫的字對照正解）
   const controls = it.kind === 'num'
     ? `<div class="ansarea"><div class="actr"><button class="btn primary big" onclick="drillSubmit()">✅ 算完了</button></div>
-       <details class="typed-opt"><summary class="dim">改用打字（選用）</summary>
+       <details class="typed-opt"${typedOpen ? ' open' : ''} ontoggle="typedOpen=this.open"><summary class="dim">改用打字（選用）</summary>
        <input id="din" class="ans-input" inputmode="text" autocomplete="off" placeholder="答案" onkeydown="if(event.key==='Enter')drillSubmit()"></details></div>`
     : `<div class="ansarea"><div class="ansrow">${it.opts.map((o, idx) => `<button class="btn opt" onclick="drillSubmit(${idx})">${mDispOpt(o)}</button>`).join('')}</div></div>`;
   app().innerHTML = `
@@ -2752,10 +2776,9 @@ function renderPracConfig() {
       </div>
       <h3>題數</h3>
       <div class="chips" id="cntChips">
-        <label class="chip"><input type="radio" name="cnt" value="5"> 5 題</label>
-        <label class="chip"><input type="radio" name="cnt" value="8" checked> 8 題</label>
-        <label class="chip"><input type="radio" name="cnt" value="12"> 12 題</label>
+        ${[5, 8, 12].map((n) => `<label class="chip"><input type="radio" name="cnt" value="${n}"${n === (S.pracCnt || 8) ? ' checked' : ''}> ${n} 題</label>`).join('')}
       </div>
+      ${(S.extbank || []).some((q) => q.src && packIsOff(q.src)) ? `<p class="dim fs13">（外部題庫有 ${(S.extbank || []).filter((q) => q.src && packIsOff(q.src)).length} 題被停用中——到 📊 數據頁可重新啟用）</p>` : ''}
       <div class="actr"><button class="btn primary" onclick="startPrac()">開始（未做過的題優先）</button></div>
     </div>`;
   pracSel('weak', true); // 弱項優先是預設，不是要多按一下的選項
@@ -2796,6 +2819,7 @@ function startPrac() {
   const topics = [...document.querySelectorAll('#topicChips input:checked')].map((i) => i.value);
   const diffs = [...document.querySelectorAll('#diffChips input:checked')].map((i) => +i.value);
   const cnt = +document.querySelector('#cntChips input:checked').value;
+  if (cnt !== (S.pracCnt || 8)) { S.pracCnt = cnt; save(); } // 記住上次選的題數
   let pool = BANK.filter((q) => topics.includes(q.topic) && diffs.includes(q.diff));
   if (!pool.length) { alert('沒有符合條件的題目'); return; }
   // 未做過優先，其次做過次數少的
@@ -2854,6 +2878,13 @@ function pracDone() {
     const strong = pAcc < 0.6 && rr.ok === rr.n;
     return `<p class="${strong ? 'praise' : 'okc'}">📈 ${TOPICS[k]}：過去 ${(pAcc * 100).toFixed(0)}%（${past.length} 題）→ 本輪 ${rr.ok}/${rr.n}${strong ? '——弱單元整輪全對，這個洞正在補起來！' : ''}</p>`;
   }).filter(Boolean).join('');
+  // 本輪卡點回顧：刷完當下最想知道「我都卡在哪」，不必跑數據頁
+  const roundStuck = [];
+  for (const a of S.attempts.slice(sessSnap ? sessSnap.att : 0)) {
+    if (a.p && Array.isArray(a.p.stuck)) for (const s of a.p.stuck) roundStuck.push({ topic: (bankById(a.qid) || {}).topic, ...s });
+  }
+  const stuckRecap = roundStuck.length ? `<div class="stuck-box"><p class="stuck-title"><b>🧠 本輪卡點</b></p>
+    ${roundStuck.slice(0, 4).map((s) => `<p style="margin:3px 0">${s.topic ? TOPICS[s.topic] + '：' : ''}${escH(s.what || '')}${s.dur ? `（停 ${s.dur}s）` : ''}${s.fix ? ` <span class="okc">💡 ${escH(s.fix)}</span>` : ''}</p>`).join('')}</div>` : '';
   app().innerHTML = `
     <h1>刷題結果</h1>
     ${dailyBanner(3)}
@@ -2863,6 +2894,7 @@ function pracDone() {
       <p class="big">答對 <b>${okN} / ${r.length}</b>${slowOk ? `，其中 <b class="warnc">${slowOk} 題「對但超時」</b>（考場上等於失分，已加入錯題本重練速度）` : ''}</p>
       ${cheer ? `<p class="praise">🎉 ${cheer}</p>` : ''}
       ${progress}
+      ${stuckRecap}
       <table class="tbl"><tr><th>單元</th><th>結果</th>${timerOn() ? '<th>耗時/目標</th>' : ''}<th>錯因</th></tr>${rows}</table>
       <div class="actr"><button class="btn" onclick="nav('stats')">看數據</button>
       <button class="btn primary" onclick="nav('prac')">再刷一輪</button></div>
@@ -2876,8 +2908,10 @@ function bkNum(head) { const m = String(head || '').match(/(\d+)/); return m ? m
 /* 選項印在題目正下方（像考卷），tap 仍作答；submitFn：single→'qSubmit'|'mockAns'（帶索引），multi→送出鈕 */
 function bkOpts(q, submitFn) {
   if (q.type === 'single') {
+    // 模擬＝正式考：點選項先「劃卡」，再按送出確認（手滑點錯不會直接鎖定）；平時刷題維持點了就走的節奏
+    const click = submitFn === 'mockAns' ? (i) => `mockPick(${i},this)` : (i) => `${submitFn}(${i})`;
     return `<div class="bk-opts">${q.opts.map((o, i) =>
-      `<div class="bk-opt" onclick="${submitFn}(${i})"><span class="bk-op">(${i + 1})</span><span>${rtTxt(o)}</span></div>`).join('')}</div>`;
+      `<div class="bk-opt" onclick="${click(i)}"><span class="bk-op">(${i + 1})</span><span>${rtTxt(o)}</span></div>`).join('')}</div>`;
   }
   if (q.type === 'multi') {
     return `<div class="bk-opts">${q.opts.map((o, i) =>
@@ -2902,6 +2936,7 @@ function bkCard(q, head, submitFn, actions) {
   </div>`;
 }
 let qsess = null;
+let typedOpen = false; // 「改用打字」摺疊的展開狀態（session 內記住：習慣打字的人不用每題展開一次）
 function renderQuestion(q, cfg) {
   qsess = { q, cfg, t0: Date.now(), warned: false, locked: false };
   const target = qTarget(q);
@@ -2913,7 +2948,7 @@ function renderQuestion(q, cfg) {
     actions = `<div class="actr">${giveUp}<button class="btn primary" onclick="qSubmit()">送出（多選）</button></div>`;
   } else {
     actions = `<div class="actr">${giveUp}<button class="btn primary big" onclick="qSubmit()">✅ 算完了，開始批改</button></div>
-      <details class="typed-opt"><summary class="dim">改用打字（選用）</summary>
+      <details class="typed-opt"${typedOpen ? ' open' : ''} ontoggle="typedOpen=this.open"><summary class="dim">改用打字（選用）</summary>
       <input id="qin" class="ans-input" autocomplete="off" placeholder="輸入答案（分數用 a/b）" onkeydown="if(event.key==='Enter')qSubmit()"></details>`;
   }
   app().innerHTML = `
@@ -3019,7 +3054,8 @@ function qShowJudge(hasAI) {
     const noInkHint = qsess.noInk
       ? '<p class="warnc">⚠ AI 沒批改：抓不到手寫筆跡——先寫再按「算完了」。</p>' : '';
     const diag = qsess.diag && (qsess.aiErr || qsess.noInk) ? `<p style="font-size:13px;background:#fff8e1;border:1px solid #f0c14b;padding:6px 9px;border-radius:6px;margin:6px 0">🔎 ${qsess.diag}</p>` : ''; // 只在批改異常時亮診斷，平常自評不出 debug 噪音
-    $('#qfb').innerHTML = `${qsess.aiErr ? `<p class="warnc">⚠ AI 批改失敗：${escH(qsess.aiErr)}——先自評，key 問題到「📊 數據」頁按「測試連線」檢查。</p>` : noInkHint || noKeyHint}${diag}${peek}
+    const noAIHint = !qsess.aiErr && !aiKey() ? '<p class="dim">（AI 批改未啟用——先對照正解自評；想要自動批改＋手寫分析，到 📊 數據頁設定 key）</p>' : '';
+    $('#qfb').innerHTML = `${qsess.aiErr ? `<p class="warnc">⚠ AI 批改失敗：${escH(qsess.aiErr)}——先自評，key 問題到「📊 數據」頁按「測試連線」檢查。</p>` : noInkHint || noKeyHint}${diag}${peek}${noAIHint}
       <p><b>答對了嗎？</b><span class="dim">（等價形式都算對）</span></p>
       <div class="actr"><button class="btn err" onclick="qResolve(false)">✗ 我錯了</button>
       <button class="btn primary" onclick="qResolve(true)">✓ 我對了</button></div>`;
@@ -3086,7 +3122,7 @@ function qResolve(ok) {
         ? '<p class="praise">🎓 這題畢業——1→3→7→14 天四關全過，從錯題本除名（戰績保留）！</p>'
         : `<p class="okc">⬆ 過關晉級：下次 ${next} 天後再驗。</p>`;
     } else if (ok && !fastOk) {
-      reviewLine = `<p class="warnc">⚡ 答對了，但這題當初是因「超時」進來的——${fmtSec(ms)} 還沒進目標 ${fmtSec(target)}。明天再驗一次速度（不算答錯）。</p>`;
+      reviewLine = `<p class="warnc">⚡ 答對了，但這題當初是因「超時」進來的——${fmtSec(ms)} 還沒進目標 ${fmtSec(target)}。明天再驗一次速度（不算答錯，但間隔回到第 1 關）。</p>`;
     } else {
       reviewLine = '<p class="badc">↩ 打回第 1 關，明天再來。</p>';
     }
@@ -3116,7 +3152,7 @@ function qResolve(ok) {
   const action = qsess.cfg.side
     ? `<div class="actr"><button class="btn primary big" onclick="sideNext()">🎯 再來一題類題</button><button class="btn" onclick="sideReturn()">↩ 回到原題</button></div>`
     : (!ok
-      ? `<p class="dim" style="margin:8px 0 4px">錯因？（點一個就進下一題）</p><div class="chips r">${ERR_TYPES.slice(0, 4).map((e) => `<button class="btn err" onclick="qFinish(false, ${ms}, '${e}')">${e}</button>`).join('')}</div><div class="actr" style="margin-top:8px"><button class="btn" onclick="qSideStart()">🎯 先練一題類題再繼續</button></div>`
+      ? `<p class="dim" style="margin:8px 0 4px">先標錯因（不會跳題——詳解看完再走）：</p><div class="chips r">${ERR_TYPES.slice(0, 4).map((e) => `<button class="chip${qsess.errPick === e ? ' sel' : ''}" onclick="qPickErr(this,'${e}')">${e}</button>`).join('')}</div><div class="actr" style="margin-top:8px"><button class="btn" onclick="qSideStart()">🎯 先練一題類題再繼續</button><button class="btn primary big" id="errnext" ${qsess.errPick ? '' : 'disabled'} onclick="qFinish(false, ${ms}, qsess.errPick)">下一題 →</button></div>`
       : `<div class="actr"><button class="btn primary big" onclick="qFinish(true, ${ms}, ${overtime ? "'超時'" : 'null'})">下一題 →</button><button class="btn" onclick="qSideStart()">🎯 再練一題類題</button></div>`);
   // ④ 中段（批改的靈魂）：先肯定你做得好的 → 錯在哪（圈在你字上）→ 🧠 卡在哪 → 🎯 下次這樣做。詳解不塞這、收摺疊。
   const willProc = aiKey() && !v && qsess.proc && qsess.proc.n; // 選擇/打字題稍後由 AI 過程點評接手稱讚＋下次，這裡就不重複
@@ -3164,6 +3200,13 @@ function qResolve(ok) {
     const el = document.getElementById('ai-proc');
     if (el) { el.innerHTML = '<p class="dim">🤖 AI 正在看你的手寫過程…（不用等，可先按下一題）</p>'; qProcReview(ok); }
   }
+}
+/* 標錯因＝選取，不跳題（詳解/卡點還要看）；「下一題」才前進 */
+function qPickErr(btn, e) {
+  if (!qsess) return;
+  qsess.errPick = e;
+  if (btn && btn.parentElement) btn.parentElement.querySelectorAll('.chip').forEach((c) => c.classList.toggle('sel', c === btn));
+  const nx = $('#errnext'); if (nx) nx.disabled = false;
 }
 let qFinLock = false; // 重入鎖：擋掉「連點兩下下一題／錯因鈕」——第一下已把 qsess 換到下一題，第二下（脫離 DOM 的舊按鈕仍會觸發）會誤記下一題並跳過它
 function qFinish(ok, ms, err) {
@@ -3217,7 +3260,11 @@ function pickSimilar(origQ, doneIds) {
 let sideState = null; // { html, sess, origQ, doneIds }：支線期間暫存原題解答畫面與 session，回得去
 function qSideStart() {
   if (!qsess) return;
-  sideState = { html: app().innerHTML, sess: qsess, origQ: qsess.q, doneIds: [qsess.q.id] };
+  // 類題不可以抽到「本輪待出的題」——否則等等正輪出到同題等於白練＋灌水
+  const exclude = [qsess.q.id,
+    ...(prac && prac.queue ? prac.queue.map((x) => x.id) : []),
+    ...(review && review.ids ? review.ids : [])];
+  sideState = { html: app().innerHTML, sess: qsess, origQ: qsess.q, doneIds: exclude };
   sideNext();
 }
 function sideNext() {
@@ -3298,17 +3345,18 @@ function mockQ() {
   (mock.qSeen[q.id] = mock.qSeen[q.id] || []).push(mock.t0); // 每輪進場時間：卡點分析只看最後一輪，跨輪空檔不算停頓
   mock.qwarned = false;
   mock.qlock = false;
+  mock.sel = null; // 單選劃卡狀態逐題歸零
   const mockRow = `<div class="mock-actions">
       ${mock.round === 1 ? `<button class="btn skip" onclick="mockSkip()">跳過 → 第二輪</button>` : `<button class="btn skip" onclick="mockGiveup()">放棄此題</button>`}
       <span id="mqtimer" class="dim"></span></div>`;
   let actions;
   if (q.type === 'single') {
-    actions = mockRow; // 點選項即作答
+    actions = `<div class="actr"><button class="btn primary" id="mock-submit" disabled onclick="mockAns(mock.sel)">送出此題</button></div>${mockRow}`; // 點選項＝劃卡，送出才鎖定
   } else if (q.type === 'multi') {
     actions = `<div class="actr"><button class="btn primary" onclick="mockAns()">送出此題</button></div>${mockRow}`;
   } else {
-    actions = `<div class="actr"><button class="btn primary big" onclick="mockAns()">✅ 算完了 → 下一題</button></div>
-      <details class="typed-opt"><summary class="dim">改用打字（選用）</summary>
+    actions = `<div class="actr"><button class="btn primary big" onclick="mockAns()">✅ 算完了，送出此題</button></div>
+      <details class="typed-opt"${typedOpen ? ' open' : ''} ontoggle="typedOpen=this.open"><summary class="dim">改用打字（選用）</summary>
       <input id="qin" class="ans-input" autocomplete="off" placeholder="答案（分數用 a/b）" onkeydown="if(event.key==='Enter')mockAns()"></details>${mockRow}`;
   }
   app().innerHTML = `
@@ -3340,8 +3388,17 @@ function mockInkDone(qid) {
   if (p) mock.proc[qid] = mergeProc(mock.proc[qid], p);
   syncInk(qid, t0, Object.assign({ mode: 'mock' }, p || {}));
 }
+/* 模擬單選的「劃卡」：先選取標記，按「送出此題」才真正作答 */
+function mockPick(i, el) {
+  if (!mock || mock.qlock) return;
+  mock.sel = i;
+  document.querySelectorAll('.bk-opt').forEach((o) => o.classList.remove('picked'));
+  if (el) el.classList.add('picked');
+  const b = $('#mock-submit'); if (b) b.disabled = false;
+}
 function mockAns(optIdx) {
   if (!mock || mock.qlock || Date.now() - mock.t0 < 350) return; // 350ms 內＝double-tap 殘留，忽略
+  if (optIdx == null && mock.paper[mock.i].type === 'single') return; // 單選還沒劃卡不能送
   mock.qlock = true;
   const q = mock.paper[mock.i];
   const elapsed = Date.now() - mock.t0;
@@ -3419,6 +3476,7 @@ function mockJudgePanel(list) {
     return `<div class="judge-item">
       <div class="judge-img">${img ? `<img src="${img}" alt="手寫過程">` : '<span class="dim">（沒有筆跡）</span>'}</div>
       <div class="judge-info">
+        <div class="wc-q fs13 dim" style="margin-bottom:4px">${rtTxt(q.q)}</div>
         <p class="dim">${TOPICS[q.topic]}｜正解：<b class="big">${q.ans[0]}</b></p>
         <div id="jai-${i}"></div>
         <div class="actr"><button class="btn sm err" id="jbad-${i}" onclick="mockJudgeSet(${i}, false)">✗ 錯</button>
@@ -3504,6 +3562,8 @@ function mockFinal() {
   const overStuck = detail.filter((d) => !d.ok && d.answered && d.ms > d.target * 1.5);
   const slowOk = detail.filter((d) => d.ok && d.ms > d.target * 1.5);
   const unused = mock.tEnd - Date.now();
+  const wrongAdded = detail.filter((d) => d.answered && (!d.ok || d.ms > d.target * 1.5)).length; // 有沒有題真的進了錯題本（頁尾那行別在全對時嚇人）
+  const unansweredIds = detail.filter((d) => !d.answered).map((d) => d.q.id);
   // 跟上一場比 + 級分跨檔 + 新高（有依據才講；退步只陳列數字不評論）
   let mockTrend = '';
   if (!mock.partial && S.mocks.length >= 1) {
@@ -3544,16 +3604,28 @@ function mockFinal() {
       ${mockTrend}
       ${cheers ? `<div class="praise"><b>先說做得好的：</b><ul>${cheers}</ul></div>` : ''}
       <ul>
-        <li>「該跳沒跳」（答錯且耗時超過上限 1.5 倍）：<b class="${overStuck.length ? 'badc' : 'okc'}">${overStuck.length} 題</b>${overStuck.length ? ' ← 這是你寫不完的直接原因' : ' ✅'}</li>
+        <li>卡太久沒跳（答錯且耗時超過建議 1.5 倍——考場上 90 秒沒路就該跳）：<b class="${overStuck.length ? 'badc' : 'okc'}">${overStuck.length} 題</b>${overStuck.length ? ' ← 這是你寫不完的直接原因' : ' ✅'}</li>
         <li>「對但太慢」：<b class="${slowOk.length ? 'warnc' : 'okc'}">${slowOk.length} 題</b>${slowOk.length ? ' ← 已加入錯題本重練速度' : ''}</li>
-        <li>剩餘未用時間：${unused > 0 ? fmtClock(unused) : '0（時間用罄）'}</li>
+        ${mock.partial ? '' : `<li>剩餘未用時間：${unused > 0 ? fmtClock(unused) : '0（時間用罄）'}</li>`}
       </ul>
+      ${mock.partial ? '<p class="dim">完成一次完整 12 題模擬，才會得到體感級分估計與模擬走勢。</p>' : ''}
       ${aiNotes ? `<div class="sol"><b>🤖 AI 抓到的出錯點：</b><ul>${aiNotes}</ul></div>` : ''}
       <div class="tblwrap"><table class="tbl"><tr><th>題目</th><th>結果</th><th>你的答案</th><th>正解</th><th>耗時/建議</th></tr>${rows}</table></div>
-      <p class="dim">錯題與超時題已進錯題本，明天到期。</p>
+      ${wrongAdded ? '<p class="dim">錯題與超時題已進錯題本，明天到期。</p>' : ''}
+      ${unansweredIds.length ? `<div class="actr"><span class="dim fs13">⊘ 放棄/未作答的 ${unansweredIds.length} 題（完全沒路的題最需要補概念）</span><button class="btn sm" onclick="addWrongManual('${unansweredIds.map(jsA).join(',')}');this.disabled=true;this.textContent='已加入 ✓'">加入錯題本</button></div>` : ''}
       <div class="actr"><button class="btn" onclick="nav('stats')">看數據</button>
       <button class="btn primary" onclick="nav('wrong')">去看錯題詳解</button></div>
     </div>`;
+}
+/* 手動把題目釘進錯題本（模擬放棄題等「沒作答但該補」的題） */
+function addWrongManual(csv) {
+  for (const id of String(csv).split(',')) {
+    if (!id || !bankById(id)) continue;
+    if (S.wrong[id] && !S.wrong[id].grad) continue; // 已在本裡就不動
+    S.wrong[id] = { fails: 0, wins: 0, itv: 1, err: '概念不熟', due: addDays(today(), 1), mt: Date.now() };
+  }
+  save();
+  updateBadge();
 }
 
 /* ═══════════ 錯題本 2.0：學習卡（先學再測），不再只是到期日表格 ═══════════ */
@@ -3660,7 +3732,7 @@ function wfShow() {
       <p class="dim">${w.err || ''}｜錯 ${w.fails} 次</p>
       <div class="wc-q" style="text-align:left">${rtTxt(q.q)}${q.fig ? `<div class="qfig">${q.fig}</div>` : ''}</div>
       <div id="wf-back" style="display:none;text-align:left">
-        <p>正解：<b class="accent big">${q.type === 'fill' ? mDispOpt(String(q.ans[0])) : q.ans.map((a) => `(${a + 1})`).join('')}</b></p>
+        <p>正解：<b class="accent big">${q.type === 'fill' ? mDispOpt(String(q.ans[0])) : q.ans.map((a) => `(${a + 1}) ${q.opts ? rtTxt(q.opts[a]) : ''}`).join('、')}</b></p>
         ${w.adv && w.adv.fe ? `<p class="badc">上次你這裡跑掉了：${escH(w.adv.fe)}</p>` : ''}
         ${w.adv && w.adv.nt ? `<div class="next-step"><b>🎯 下次這樣做：</b>${escH(w.adv.nt)}</div>` : ''}
         ${q.tip ? `<p class="tip">💡 ${rtTxt(q.tip)}</p>` : ''}
@@ -3675,7 +3747,8 @@ function wfFlip() {
     wflash.back = true;
     const b = $('#wf-back'); if (b) b.style.display = 'block';
     const bt = $('#wf-btns');
-    if (bt) bt.innerHTML = '<button class="btn primary big" onclick="wflash.i++;wfShow()">下一張 →</button>';
+    const last = wflash.i >= wflash.ids.length - 1;
+    if (bt) bt.innerHTML = `<button class="btn primary big" onclick="wflash.i++;wfShow()">${last ? '完成 ✓' : '下一張 →'}</button>`;
   }
 }
 function renderWrong() {
@@ -3758,8 +3831,9 @@ function reviewNext() {
 /* ═══════════ 數據 ═══════════ */
 function renderStats() {
   if (!S.attempts.length) {
+    // 沒做題也要能管理內容包/登錄模考（家教流程常是「先灌題包再開始做」）
     app().innerHTML = `<h1>📊 數據</h1>${dailyCard()}<div class="card"><p>還沒有做題數據。</p>
-      <div class="actr"><button class="btn primary" onclick="nav('mock')">去摸底</button></div></div>${timerSettingCard()}${aiCard()}${syncCard()}${backupCard()}`;
+      <div class="actr"><button class="btn primary" onclick="nav('mock')">去摸底</button></div></div>${timerSettingCard()}${extMockCard()}${packCard()}${aiCard()}${syncCard()}${backupCard()}`;
     return;
   }
   // 單元統計
@@ -3782,10 +3856,10 @@ function renderStats() {
   // 錯因統計
   const errCount = {};
   for (const a of S.attempts) if (a.err) errCount[a.err] = (errCount[a.err] || 0) + 1;
-  const errTotal = Object.values(errCount).reduce((x, y) => x + y, 0) || 1;
+  const errMax = Math.max(1, ...Object.values(errCount)); // 以最大次數正規化：條長差異才看得出來（跟卡點卡同一套視覺語言）
   const errBars = ERR_TYPES.filter((e) => errCount[e]).map((e) => `
     <div class="bar-row"><span class="bar-label">${e}</span>
-      <div class="bar"><div class="bar-fill y" style="width:${(errCount[e] / errTotal * 100).toFixed(0)}%"></div></div>
+      <div class="bar"><div class="bar-fill y" style="width:${(errCount[e] / errMax * 100).toFixed(0)}%"></div></div>
       <span class="bar-val">${errCount[e]} 次</span></div>`).join('') || '<p class="dim">尚無錯因紀錄</p>';
   const ERR_RX = {
     '概念不熟': '先到「📓 錯題本」頁調出該單元的老師方法庫（口訣＋方法），看完立刻限時重做同型題——看懂不算數，寫出來才算。',
@@ -3883,6 +3957,8 @@ function renderStats() {
     ${aiCard()}
     ${syncCard()}
     ${backupCard()}`;
+  const cw = document.querySelector('.chartwrap'); // 窄螢幕橫向捲動的每日圖：預設捲到最右（今天那根）
+  if (cw) cw.scrollLeft = cw.scrollWidth;
 }
 /* 計時器顯示開關（預設關：初期以寫完為主；時間照樣幕後記錄） */
 function setTimerVis(on) { S.hideTimer = on ? false : true; save(); renderStats(); }
@@ -4084,10 +4160,12 @@ function syncPill() {
   el.textContent = syncState.pushErr ? '🟡 ' + syncState.msg : '🟢 ☁ ' + (syncState.msg || '已登入');
   el.className = syncState.pushErr ? 'mid' : 'ok';
 }
+let syncGateAsked = false; // 一個 session 只問一次：之後交給右下角常駐的 🔴 未登入角標，別每開一輪就彈一次
 function syncGate() {
   // 回傳 true = 放行。沒登入時攔下來問，避免「做了題但沒上雲」而不自知。
-  if (!supa || syncState.user) return true;
-  if (confirm('⚠️ 尚未登入雲端同步！\n\n現在開始做題，紀錄只會存在這台裝置的瀏覽器裡——換裝置、清瀏覽器就沒了。\n\n按「確定」先去登入（推薦）\n按「取消」仍然開始（僅本機保存）')) {
+  if (!supa || syncState.user || syncGateAsked) return true;
+  syncGateAsked = true;
+  if (confirm('⚠️ 尚未登入雲端同步！\n\n現在開始做題，紀錄只會存在這台裝置的瀏覽器裡——換裝置、清瀏覽器就沒了。\n\n按「確定」先去登入（推薦）\n按「取消」仍然開始（僅本機保存，這次不再提醒）')) {
     nav('stats');
     return false;
   }
