@@ -2,6 +2,27 @@
 
 > 2026-07-09 建立。給接手開發 app 的模型：這份講**程式本身的架構、資料模型、功能系統、修改與部署方式**。內容生產線（題庫/類題/蒸餾）看 OPERATIONS.md。戰略與診斷看 README.md。
 
+## ⚡ 0712a 大改版摘要（2026-07-11 UI/UX 重設計，先讀這段）
+
+對準飼主五大需求（練對範圍量／受激勵／錯題人話學習／弱點追蹤應用／手寫分析有意義）的一輪整體重設計：
+
+1. **首頁＝作戰儀表板**：`todayCard`（菜單預覽：⚡推薦速訓+理由、📓到期錯題數、🎯弱項單元+理由，各段可單獨啟動；streak 保衛戰；模擬節奏提醒 `mockDueHint`）＋級分梯 `gradeLadder`（9~15 格、🎯13 描邊、差距翻成「再多對 N 題」）＋**十四單元戰力地圖 `masteryMap`**（色階=答對率、⏱=耗時比>1.2、點 tile=`startPracTopic` 專攻 6 題、📚=`showUnitNotes` 單元重點 modal）＋`homeInsights`（🎓畢業數＋🧠最近卡點）。
+2. **錯題本 2.0**（`renderWrong` 重寫）：錯題學習卡 `wrongCard`（題目全文＋「上次你這裡跑掉了」w.adv.fe＋「🎯下次這樣做」w.adv.nt＋1→3→7→14 畢業階梯＋最近5筆時間線＋錯因 chips 可改標＋詳解/老師教法摺疊＋同單元加練/重測）；🃏 衝刺複習 `startWrongFlash`（翻卡過建議、不動排程）；**畢業改標記不刪**（`w.grad=日期`，dueWrong 過濾、mergeState 以 witv=99 比較、再錯回鍋保留前科）＋畢業慶祝（qResolve 預告＋reviewNext 結算＋累計數）。
+3. **AI 建議持久化**：`recordAttempt(q,ok,ms,err,mode,proc,ai,opts)` → `rec.ai={fe,nt}`（截160字）；錯題卡冗餘 `w.adv={fe,nt,d}`；非同步路徑（qProcReview/mockAIJudge）事後回寫。**複習也記 attempts**（mode:'review'、opts.skipWrong 防與 reviewResult 打架）→ 複習日不再斷 streak、計每日點數。**超時題複習有速度門檻**（answer 對但 > 目標 → reviewResult slow：不記 fails、打回第1關）。
+4. **🧠 手寫卡點語意分析（需求5 核心）**：`inkStuckShots(qid,t0)` 把 ≥20s 停頓（最長≤3個）畫成證據圖（原色=停頓當下已寫、藍=之後頭幾筆）；掛進 `aiGradeCall/aiProcCall`（同一次 API），JSON 加 `stuck:[{phase(讀題|選方法|想公式|卡計算|驗算收尾),what,unstick}]`；`normStuck` 正規化後存 `rec.p.stuck`；無 AI 退 `stuckLabel` 位置啟發式（起步/中段/收尾卡）。顯示：單題 `stuckHTML` 區塊＋「⏸ 從卡點前回放」（inkReplay 第3參數 jumpMs）；數據頁「你最常卡的地方」phase 彙總＋處方直達；首頁最近卡點。
+5. **激勵**：goalCrossBanner（每日30點跨線一次性慶祝，goalHit 存 S.daily）、drillDone 首次達標/已自動化 X/12/個人最速、renderDrillMenu 熟練五階色條+近6輪點陣+排序、pracDone 單元進步對照（樣本≥5、只講進步）、mockFinal 與上場比+級分跨檔+新高、phone hist 加 med+個人最速、praiseFor 拆史實類（AI 在場時保留曾錯今對/破最速）、milestoneCard。
+6. **內容管線 v2（參考書就緒）**：匯入信封 `{kind:'qpack'|'flash'|'notes', name, items:[…]}`；`validateQ` 逐題驗證（壞題擋下並列名）；`unionById(inc,cur)` 改 **rev 覆蓋**（同 id 取 rev 大者，回報 新增/更新/略過）；notes → `S.extnotes[{id,topic,title,html,order,src,rev}]`（錯題本 notesLibCard、戰力地圖 📚 modal）；flash → `S.extflash`（併入手機公式卡）；packCard 題包管理（按 src 分組、可停用 S.packOff）；題目 schema 新欄 `rev/grp(題組id)/stem(共用題幹)/solFig(詳解配圖，不過 rtTxt)`；mergeState 對 extflash/extnotes/packOff 有合併規則。
+7. **修掉既有 bug**：`addDays` 本地 parse+UTC 輸出在 UTC+8 少一天（到期日提前、streak 跳算）→ 全 UTC；save() 包 quota try/catch；bankById 走 BANK_MAP（Map）；attemptsOf 排序比較改 attCountMap；口訣卡 id 改內容 hash（重灌方法庫不錯位，舊 mn:* 權重歸零重學）；dailyFlow 殭屍橫幅（nav 時清）；診斷黃框只在異常時顯示。
+8. **視覺**：token 收斂（--accent-soft/--mark/--paper-*/熟練度 --m0~m4/圓角/陰影）、字階（h1 23/h2 17/h3 標籤體）、按鈕浮起+按壓回饋+focus-visible+粗指標加大、nav 觸控 36px+溢出漸隱、批改單浮層+回饋區改黑體、單元橫條 73/80 刻度+四段色、每日圖目標線+今日聚焦+全數值標籤、手機 bar-row 兩行 grid+表格 tblwrap+safe-area。theme-color 統一 #0f766e。
+
+### 內容包格式（之後灌參考書用，餵給 📊 數據頁「匯入備份」即可）
+```js
+// 題包：{"kind":"qpack","name":"龍騰講義Ch3","items":[{id,topic,type,diff,q,opts?,ans,sol,tip?,target?,src,rev?,grp?,stem?,fig?,solFig?}]}
+// 重點包：{"kind":"notes","name":"...","items":[{id,topic,title,html,order?,src?,rev?}]}  // html 用與 sol 相同的 \(…\) KaTeX 格式
+// 公式卡包：{"kind":"flash","name":"...","items":[{id,unit,front,back,src?,rev?}]}
+// 規則：同 id 重灌時 rev 較大者覆蓋；SVG 一律放 fig/solFig 欄位，嚴禁內嵌在 q/sol 字串（rtTxt 會咬爛 markup）。
+```
+
 ## 0. 一句話架構
 
 **單頁純前端 vanilla JS，無框架、無 build step、無 npm**。四個檔案（index.html/style.css/bank.js/app.js）直接開就能跑。資料離線優先存 localStorage，登入後鏡像同步到 Supabase。手機電腦皆可，響應式。
