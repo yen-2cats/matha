@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0711n'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0711o'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -140,10 +140,14 @@ function inkStart(qid, t0, since) {
     : Math.max(340, Math.round(window.innerHeight * 0.45), Math.ceil(maxY + 80));
   ink = { qid, t0, penAt: 0, sur: {} };
   ink.sur.calc = inkSurface('calc', cv, h);
+  if (cv.classList.contains('qink') && window.ResizeObserver) { // 整卡書寫層：卡片高度隨 KaTeX/加長/展開打字欄變動，畫布跟著重算
+    ink.ro = new ResizeObserver(() => { if (ink && ink.sur.calc) inkSizeSur(ink.sur.calc); });
+    ink.ro.observe(cv.parentElement);
+  }
   const qcv = $('#qink-cv');
   if (qcv) {
     ink.sur.q = inkSurface('q', qcv, 0);
-    if (window.ResizeObserver) { // 題卡高度會隨作答內容變動（如展開打字欄）：畫布尺寸跟著走
+    if (window.ResizeObserver && !ink.ro) {
       ink.ro = new ResizeObserver(() => { if (ink && ink.sur.q) inkSizeSur(ink.sur.q); });
       ink.ro.observe(qcv.parentElement);
     }
@@ -156,11 +160,12 @@ function inkStart(qid, t0, since) {
 function inkSizeSur(sur) {
   const dpr = window.devicePixelRatio || 1;
   let w, h;
-  if (sur.key === 'q') {
-    const wrap = sur.cv.parentElement; // .qwrap（畫記層蓋在題目文字上）
+  const wrap = sur.cv.parentElement;
+  if (sur.key === 'q' || sur.cv.classList.contains('qink')) {
+    // 整卡書寫層：畫布蓋滿整張卡（題目也能寫），尺寸跟著卡片走
     w = wrap.clientWidth; h = wrap.clientHeight;
   } else {
-    w = sur.cv.parentElement.clientWidth; h = sur.h;
+    w = wrap.clientWidth; h = sur.h;
   }
   sur.cv.width = Math.max(1, Math.round(w * dpr));
   sur.cv.height = Math.max(1, Math.round(h * dpr));
@@ -170,7 +175,14 @@ function inkSizeSur(sur) {
   inkRedraw(sur);
 }
 function inkExtend(dh) {
-  if (!ink || !ink.sur.calc || ink.sur.calc.h >= 4000) return;
+  if (!ink || !ink.sur.calc) return;
+  const cv = ink.sur.calc.cv;
+  if (cv.classList.contains('qink')) { // 整卡書寫層：加長＝把空白書寫區加高，卡片變高→ResizeObserver 自動重算畫布
+    const pad = cv.parentElement.querySelector('.write-pad');
+    if (pad) { const cur = parseInt(pad.style.minHeight, 10) || pad.clientHeight || 300; pad.style.minHeight = Math.min(4000, cur + dh) + 'px'; }
+    return;
+  }
+  if (ink.sur.calc.h >= 4000) return;
   ink.sur.calc.h = Math.min(4000, ink.sur.calc.h + dh);
   inkSizeSur(ink.sur.calc);
 }
@@ -231,7 +243,7 @@ function inkMove(e, sur) {
   const c = sur.ctx;
   c.strokeStyle = INK_COLORS[sur.cur.c] || INK_COLORS.k; c.lineWidth = INK_W;
   c.beginPath(); c.moveTo(p[0], p[1]); c.lineTo(x, y); c.stroke();
-  if (sur.key === 'calc' && y > sur.h - 48) inkExtend(320);
+  if (sur.key === 'calc' && y > sur.cv.clientHeight - 48) inkExtend(320); // 寫到接近底部自動加長（整卡層用實際畫布高度）
 }
 function inkUp(e, sur) {
   if (!ink) return;
@@ -465,9 +477,8 @@ function mergeProc(a, b) {
 }
 async function inkReplay(qid, t0) {
   const cv = $('#ink-cv'); if (!cv || replaying) return;
-  const scroll = cv.closest('.ink-scroll'); // 批改後計算紙被 :has 收起：回放前先掀開，結束再收回，否則在隱藏畫布上畫＝看不到
-  const prevDisp = scroll ? scroll.style.display : '';
-  if (scroll) { scroll.style.display = 'block'; try { scroll.scrollIntoView({ block: 'center' }); } catch (e) {} }
+  const card = cv.closest('.qcard.booklet.sheet'); // 批改後整卡書寫層被 :has 收起：回放前用 .replaying 掀開，結束再收回
+  if (card) { card.classList.add('replaying'); try { card.scrollIntoView({ block: 'center' }); } catch (e) {} }
   replaying = true;
   const ctx = cv.getContext('2d');
   const st = inkStore(qid);
@@ -505,9 +516,9 @@ async function inkReplay(qid, t0) {
     }
     inkWipe(cv, ctx);
     for (const a of aliveAt(Date.now())) inkDrawStroke(ctx, a);
-  } finally { // 任何中止點都要收乾淨：解鎖、還原計算紙的收合、關字幕
+  } finally { // 任何中止點都要收乾淨：解鎖、把整卡書寫層收回、關字幕
     replaying = false;
-    if (scroll && scroll.isConnected) scroll.style.display = prevDisp;
+    if (card && card.isConnected) card.classList.remove('replaying');
     unflash();
   }
 }
@@ -2062,15 +2073,11 @@ function drillNext() {
   drill.t0 = Date.now();
   drill.qid = `drill:${drill.key}:${drill.t0}`;
   // 統一計算紙：題目 → 批改槽 → 一張書寫畫布 → 按鈕（速訓不加 :has 收合，自評時要看得到自己寫的字對照正解）
-  const body = it.kind === 'num'
-    ? `<div class="sheet-bar"><b>✍️ 計算紙　·　答案寫在最後</b>${inkToolsHTML()}</div>
-       <div class="ink-scroll" style="margin:6px 16px 0"><canvas id="ink-cv" data-h="240"></canvas></div>
-       <div class="ansarea"><div class="actr"><button class="btn primary big" onclick="drillSubmit()">✅ 算完了</button></div>
+  const controls = it.kind === 'num'
+    ? `<div class="ansarea"><div class="actr"><button class="btn primary big" onclick="drillSubmit()">✅ 算完了</button></div>
        <details class="typed-opt"><summary class="dim">改用打字（選用）</summary>
        <input id="din" class="ans-input" inputmode="text" autocomplete="off" placeholder="答案" onkeydown="if(event.key==='Enter')drillSubmit()"></details></div>`
-    : `<div class="ansarea"><div class="ansrow">${it.opts.map((o, idx) => `<button class="btn opt" onclick="drillSubmit(${idx})">${mDispOpt(o)}</button>`).join('')}</div></div>
-       <div class="sheet-bar"><b>✍️ 計算紙（隨手算）</b>${inkToolsHTML()}</div>
-       <div class="ink-scroll" style="margin:6px 16px 12px"><canvas id="ink-cv" data-h="200"></canvas></div>`;
+    : `<div class="ansarea"><div class="ansrow">${it.opts.map((o, idx) => `<button class="btn opt" onclick="drillSubmit(${idx})">${mDispOpt(o)}</button>`).join('')}</div></div>`;
   app().innerHTML = `
     <div class="session-head">
       <span>${d.name}｜第 ${drill.i + 1} / 12 題</span>
@@ -2079,9 +2086,12 @@ function drillNext() {
     </div>
     <div id="q-flash" class="ink-flash" style="display:none"></div>
     <div class="card qcard booklet sheet">
-      <div class="bk-item"><div class="bk-content" style="text-align:center;font-size:24px">${rtTxt(it.q)}</div></div>
+      <div class="sheet-tools"><b>✍️ 整張都能寫</b>${inkToolsHTML()}</div>
+      <div class="bk-item"><div class="bk-content" style="text-align:center;font-size:22px">${rtTxt(it.q)}</div></div>
+      <div class="write-pad" style="min-height:30vh"></div>
+      ${controls}
       <div id="dfb"></div>
-      ${body}
+      <canvas id="ink-cv" class="qink"></canvas>
     </div>`;
   sessionChrome(true);
   inkStart(drill.qid, drill.t0);
@@ -2386,14 +2396,17 @@ function bkOpts(q, submitFn) {
 /* 統一計算紙卡：題目印在最上 → 批改結果槽（就在題目正下方）→ 計算紙工具 → 一大張書寫畫布 → 按鈕沉底。
    一整張連續的紙、題目正下方就能寫；批改後用 :has() 自動收起計算紙與按鈕，結果直接顯示在題目下。 */
 function bkCard(q, head, submitFn, actions) {
+  // 整卡書寫層：整張卡就是一張計算紙——題目印在 canvas 底下（題目上、旁邊、空白處都能寫），
+  // 工具列與作答按鈕浮在最上層可點；批改後用 :has 收起書寫層、只留題目＋結果。
   return `<div class="card qcard booklet sheet">
     <div class="bk-head"><span class="bk-exam">數學Ａ</span><span class="bk-sect">${sectionLabel(q)}</span></div>
+    <div class="sheet-tools"><b>✍️ 整張都能寫${q.type === 'fill' ? '，答案寫在最後、圈起來' : ''}</b>${inkToolsHTML()}</div>
     <div class="bk-item"><span class="bk-num">${bkNum(head)}</span>
       <div class="bk-content">${rtTxt(q.q)}${q.fig ? `<div class="qfig">${q.fig}</div>` : ''}${bkOpts(q, submitFn)}</div></div>
-    <div id="qfb"></div>
-    <div class="sheet-bar"><b>✍️ 計算紙${q.type === 'fill' ? '　·　答案寫在最後、圈起來' : ''}</b>${inkToolsHTML()}</div>
-    <div class="ink-scroll sheet-scroll"><canvas id="ink-cv" data-h="0"></canvas></div>
+    <div class="write-pad"></div>
     <div class="ansarea">${actions}</div>
+    <div id="qfb"></div>
+    <canvas id="ink-cv" class="qink"></canvas>
   </div>`;
 }
 let qsess = null;
