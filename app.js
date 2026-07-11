@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0711s'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0711t'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -1712,82 +1712,71 @@ function mDispOpt(s) { return typeof s === 'string' ? texVal(s) : s; }
    零碎時間、單手、全按鈕作答（不手寫不打字）。內容＝學測數A該背/該心算的：
    公式、定理、幾何原則、特殊值＋老師 42 堂課強調的口訣。紀錄存 S.phone → 雲端同步。 */
 const FLASH = [
-  // 數與式/多項式
-  { id: 'f1', unit: 'num', front: '算幾不等式', back: '(a+b)/2 ≥ √(ab)（a,b>0；等號成立 ⇔ a=b）' },
-  { id: 'f2', unit: 'num', front: '|x−a| < r 拆開來是？', back: 'a−r < x < a+r（絕對值＝到 a 的距離小於 r）' },
-  { id: 'f3', unit: 'num', front: '和/差的立方公式 a³±b³', back: 'a³±b³ = (a±b)(a²∓ab+b²)' },
-  { id: 'f4', unit: 'poly', front: '根與係數（ax²+bx+c=0）', back: '兩根和 = −b/a、兩根積 = c/a' },
-  { id: 'f5', unit: 'poly', front: '判別式判根', back: 'b²−4ac：>0 兩相異實根、=0 重根、<0 無實根' },
-  { id: 'f6', unit: 'poly', front: '拋物線 y=ax²+bx+c 的頂點 x 座標', back: 'x = −b/(2a)（最大/最小值發生處）' },
-  { id: 'f7', unit: 'poly', front: '餘式定理', back: 'f(x) 除以 (x−a) 的餘式 = f(a)' },
-  { id: 'f8', unit: 'poly', front: '因式定理', back: 'f(a) = 0 ⇔ (x−a) 是 f(x) 的因式' },
-  // 直線與圓
-  { id: 'f9', unit: 'line', front: '點 (x₀,y₀) 到直線 ax+by+c=0 的距離', back: '|ax₀+by₀+c| / √(a²+b²)' },
-  { id: 'f10', unit: 'line', front: '兩直線垂直的斜率條件', back: 'm₁·m₂ = −1（平行則 m₁ = m₂）' },
-  { id: 'f11', unit: 'line', front: '圓 x²+y²+dx+ey+f=0 的圓心', back: '(−d/2, −e/2)，半徑 = √(d²/4+e²/4−f)' },
-  { id: 'f12', unit: 'line', front: '直線與圓的位置關係怎麼判？', back: '比圓心到直線距離 d 與半徑 r：d<r 交兩點、d=r 相切、d>r 不相交' },
-  { id: 'f13', unit: 'line', front: '圓外一點的切線長', back: '√(d²−r²)（d=點到圓心距離）' },
-  { id: 'f14', unit: 'line', front: '三角形的外心／內心／重心是什麼線的交點？', back: '外心＝中垂線交點（到三頂點等距）；內心＝角平分線交點（到三邊等距）；重心＝中線交點（分中線 2:1）' },
-  // 指對數
-  { id: 'f15', unit: 'exp', front: '指數律三條', back: 'aᵐ·aⁿ = aᵐ⁺ⁿ；(aᵐ)ⁿ = aᵐⁿ；aᵐ/aⁿ = aᵐ⁻ⁿ' },
-  { id: 'f16', unit: 'exp', front: '對數律三條', back: 'log(ab)=log a+log b；log(a/b)=log a−log b；log aⁿ = n·log a' },
-  { id: 'f17', unit: 'exp', front: '換底公式', back: 'log_a b = log b / log a（任何新底都行）；log_a b · log_b a = 1' },
-  { id: 'f18', unit: 'exp', front: '正整數 N 的位數', back: '位數 = ⌊log₁₀N⌋ + 1' },
-  { id: 'f19', unit: 'exp', front: 'y=aˣ 與 y=log_a x 必過的點', back: 'aˣ 過 (0,1)；log_a x 過 (1,0)；兩圖形對 y=x 對稱' },
-  // 數列級數
-  { id: 'f20', unit: 'seq', front: '等差數列 aₙ 與前 n 項和', back: 'aₙ = a₁+(n−1)d；Sₙ = n(a₁+aₙ)/2' },
-  { id: 'f21', unit: 'seq', front: '等比數列 aₙ 與前 n 項和', back: 'aₙ = a₁·rⁿ⁻¹；Sₙ = a₁(1−rⁿ)/(1−r)（r≠1）' },
-  { id: 'f22', unit: 'seq', front: '1+2+…+n 與 1²+2²+…+n²', back: 'n(n+1)/2；n(n+1)(2n+1)/6' },
-  // 排列組合
-  { id: 'f24', unit: 'comb', front: 'C(n,k) 與 P(n,k) 的公式', back: 'C(n,k)=n!/(k!(n−k)!)；P(n,k)=n!/(n−k)!；C(n,k)=C(n,n−k)' },
-  { id: 'f25', unit: 'comb', front: '環狀排列', back: 'n 人圍圓桌 = (n−1)!' },
-  { id: 'f26', unit: 'comb', front: '重複組合 H', back: 'H(n,k) = C(n+k−1, k)（n 類選 k 個可重複）' },
-  { id: 'f27', unit: 'comb', front: '二項式定理的一般項', back: '(x+y)ⁿ 的一般項 = C(n,k)·xⁿ⁻ᵏ·yᵏ' },
-  { id: 'f28', unit: 'comb', front: '取捨原理（兩集合）', back: '|A∪B| = |A|+|B|−|A∩B|' },
-  // 機率統計
-  { id: 'f29', unit: 'prob', front: '條件機率', back: 'P(A|B) = P(A∩B)/P(B)' },
-  { id: 'f30', unit: 'prob', front: '獨立事件的判定', back: 'A、B 獨立 ⇔ P(A∩B) = P(A)·P(B)' },
-  { id: 'f31', unit: 'prob', front: '期望值', back: 'E = Σ（值 × 機率）' },
-  { id: 'f32', unit: 'data', front: '資料全部做 ax+b 變換後，平均與標準差？', back: '平均 → aμ+b；標準差 → |a|σ（平移不改變標準差）' },
-  { id: 'f33', unit: 'data', front: '相關係數 r 的範圍與迴歸直線必過點', back: '−1 ≤ r ≤ 1；迴歸直線必過 (x̄, ȳ)' },
-  // 三角
-  { id: 'f34', unit: 'trig1', front: 'sin/cos/tan 30°、45°、60°', back: 'sin: 1/2、√2/2、√3/2｜cos: √3/2、√2/2、1/2｜tan: √3/3、1、√3' },
-  { id: 'f35', unit: 'trig1', front: '平方關係與商數關係', back: 'sin²θ+cos²θ=1；tanθ = sinθ/cosθ' },
-  { id: 'f36', unit: 'trig1', front: '正弦定理', back: 'a/sinA = b/sinB = c/sinC = 2R（R=外接圓半徑）' },
-  { id: 'f37', unit: 'trig1', front: '餘弦定理', back: 'c² = a²+b²−2ab·cosC（求邊）；cosC = (a²+b²−c²)/2ab（求角）' },
-  { id: 'f38', unit: 'trig1', front: '三角形面積（兩邊夾角）與海龍公式', back: '面積 = (1/2)ab·sinC；海龍 = √(s(s−a)(s−b)(s−c))，s=半周長' },
-  { id: 'f39', unit: 'trig1', front: 'sin(180°−θ)、cos(180°−θ)', back: 'sin(180°−θ)=sinθ；cos(180°−θ)=−cosθ（補角）' },
-  { id: 'f40', unit: 'trig2', front: '和角公式 sin(A±B)、cos(A±B)', back: 'sin(A±B)=sinAcosB±cosAsinB；cos(A±B)=cosAcosB∓sinAsinB（cos 符號相反）' },
-  { id: 'f41', unit: 'trig2', front: '倍角公式', back: 'sin2θ=2sinθcosθ；cos2θ=cos²θ−sin²θ=2cos²θ−1=1−2sin²θ' },
-  { id: 'f42', unit: 'trig2', front: '疊合 a·sinθ + b·cosθ', back: '= √(a²+b²)·sin(θ+φ)，最大值 √(a²+b²)、最小值 −√(a²+b²)' },
-  { id: 'f43', unit: 'trig2', front: 'y = sin(bx) 的週期', back: '2π/|b|（tan 的週期是 π/|b|）' },
-  // 平面向量
-  { id: 'f44', unit: 'vec', front: '內積的兩種算法', back: 'a·b = |a||b|cosθ = x₁x₂+y₁y₂' },
-  { id: 'f45', unit: 'vec', front: '向量垂直與平行的判定', back: '垂直 ⇔ 內積=0；平行 ⇔ x₁y₂−x₂y₁=0' },
-  { id: 'f46', unit: 'vec', front: '正射影向量', back: 'a 在 b 上的正射影 = (a·b/|b|²)·b；長度 = |a·b|/|b|' },
-  { id: 'f47', unit: 'vec', front: '兩向量張出的三角形面積', back: '(1/2)|x₁y₂−x₂y₁|（平行四邊形不除 2）' },
-  { id: 'f48', unit: 'vec', front: '分點公式（AP:PB = m:n）', back: 'P = (n·A + m·B)/(m+n)——靠近誰，誰的權重反而小' },
-  { id: 'f49', unit: 'vec', front: '三角形重心（向量）', back: 'G = (A+B+C)/3' },
-  { id: 'f50', unit: 'vec', front: '柯西不等式（二維）', back: '(a²+b²)(c²+d²) ≥ (ac+bd)²；等號 ⇔ ad=bc（平行時）' },
-  // 空間
-  { id: 'f51', unit: 'svec', front: '空間兩點距離', back: '√(Δx²+Δy²+Δz²)' },
-  { id: 'f52', unit: 'svec', front: '外積的幾何意義', back: '|a×b| = 兩向量張出的平行四邊形面積；方向依右手定則、同時垂直 a 與 b' },
-  { id: 'f53', unit: 'splane', front: '平面 ax+by+cz=d 的法向量', back: '(a, b, c)——係數直接讀' },
-  { id: 'f54', unit: 'splane', front: '點到平面距離', back: '|ax₀+by₀+cz₀−d| / √(a²+b²+c²)' },
-  { id: 'f55', unit: 'splane', front: '兩平面的夾角', back: '＝兩法向量的夾角（取銳角）；平行 ⇔ 法向量平行' },
-  { id: 'f56', unit: 'svec', front: '三垂線定理', back: '平面外一點的斜線在平面上的投影若垂直平面內某直線，則斜線本身也垂直該直線（垂直投影 ⇒ 垂直斜線）' },
-  // 矩陣
-  { id: 'f57', unit: 'mat', front: '二階行列式與面積放大率', back: 'det = ad−bc；線性變換把面積放大 |det| 倍' },
-  { id: 'f58', unit: 'mat', front: '二階反矩陣', back: '(1/(ad−bc))·[d −b; −c a]——主對角線互換、副對角線變號' },
-  { id: 'f59', unit: 'mat', front: '旋轉 θ 的矩陣', back: '[cosθ −sinθ; sinθ cosθ]' },
-  { id: 'f60', unit: 'mat', front: '轉移矩陣的特徵', back: '每一行（欄）的和 = 1、元素皆 ≥0；穩定狀態＝乘再多次也不變的分布' },
-  // 幾何原則
-  { id: 'f61', unit: 'line', front: '平行四邊形對角線性質', back: '互相平分（交點是兩對角線中點）' },
-  { id: 'f62', unit: 'line', front: '三角形兩邊中點連線', back: '平行第三邊、長度是第三邊的一半' },
-  { id: 'f63', unit: 'prob', front: '至少一次的機率', back: 'P(至少一次) = 1 − P(一次都沒有)——「至少」先想補集' },
-  { id: 'f64', unit: 'num', front: '√a·√b 與 √(a²b) 的化簡', back: '√48 = √(16·3) = 4√3——先抓最大平方因數' },
-  { id: 'f65', unit: 'exp', front: '2¹⁰ ≈ ?（常用近似）', back: '2¹⁰ = 1024 ≈ 10³；log₁₀2 ≈ 0.3010、log₁₀3 ≈ 0.4771' },
-  { id: 'f66', unit: 'data', front: '中位數/四分位數要先做什麼？', back: '先排序！Q1、Q3 分別是前半、後半的中位數；IQR = Q3−Q1' },
+  { id: "f1", unit: "num", front: "算幾不等式", back: "\\(\\frac{a+b}{2} \\ge \\sqrt{ab}\\)（\\(a,b \\gt 0\\)；等號成立 \\(\\iff a=b\\)）" },
+  { id: "f2", unit: "num", front: "\\(|x-a| \\lt r\\) 拆開來是？", back: "\\(a-r \\lt x \\lt a+r\\)（絕對值＝到 \\(a\\) 的距離小於 \\(r\\)）" },
+  { id: "f3", unit: "num", front: "和/差的立方公式 \\(a^3 \\pm b^3\\)", back: "\\(a^3 \\pm b^3 = (a \\pm b)(a^2 \\mp ab + b^2)\\)" },
+  { id: "f4", unit: "poly", front: "根與係數（\\(ax^2+bx+c=0\\)）", back: "兩根和 \\(= -\\frac{b}{a}\\)、兩根積 \\(= \\frac{c}{a}\\)" },
+  { id: "f5", unit: "poly", front: "判別式判根", back: "\\(b^2-4ac\\)：\\(\\gt 0\\) 兩相異實根、\\(=0\\) 重根、\\(\\lt 0\\) 無實根" },
+  { id: "f6", unit: "poly", front: "拋物線 \\(y=ax^2+bx+c\\) 的頂點 \\(x\\) 座標", back: "\\(x = -\\frac{b}{2a}\\)（最大/最小值發生處）" },
+  { id: "f7", unit: "poly", front: "餘式定理", back: "\\(f(x)\\) 除以 \\((x-a)\\) 的餘式 \\(= f(a)\\)" },
+  { id: "f8", unit: "poly", front: "因式定理", back: "\\(f(a) = 0 \\iff (x-a)\\) 是 \\(f(x)\\) 的因式" },
+  { id: "f9", unit: "line", front: "點 \\((x_0,y_0)\\) 到直線 \\(ax+by+c=0\\) 的距離", back: "\\(\\frac{|ax_0+by_0+c|}{\\sqrt{a^2+b^2}}\\)" },
+  { id: "f10", unit: "line", front: "兩直線垂直的斜率條件", back: "\\(m_1 \\cdot m_2 = -1\\)（平行則 \\(m_1 = m_2\\)）" },
+  { id: "f11", unit: "line", front: "圓 \\(x^2+y^2+dx+ey+f=0\\) 的圓心", back: "\\(\\left(-\\frac{d}{2}, -\\frac{e}{2}\\right)\\)，半徑 \\(= \\sqrt{\\frac{d^2}{4}+\\frac{e^2}{4}-f}\\)" },
+  { id: "f12", unit: "line", front: "直線與圓的位置關係怎麼判？", back: "比圓心到直線距離 \\(d\\) 與半徑 \\(r\\)：\\(d \\lt r\\) 交兩點、\\(d=r\\) 相切、\\(d \\gt r\\) 不相交" },
+  { id: "f13", unit: "line", front: "圓外一點的切線長", back: "\\(\\sqrt{d^2-r^2}\\)（\\(d=\\)點到圓心距離）" },
+  { id: "f14", unit: "line", front: "三角形的外心／內心／重心是什麼線的交點？", back: "外心＝中垂線交點（到三頂點等距）；內心＝角平分線交點（到三邊等距）；重心＝中線交點（分中線 2:1）" },
+  { id: "f15", unit: "exp", front: "指數律三條", back: "\\(a^m\\cdot a^n = a^{m+n}\\)；\\((a^m)^n = a^{mn}\\)；\\(a^m/a^n = a^{m-n}\\)" },
+  { id: "f16", unit: "exp", front: "對數律三條", back: "\\(\\log(ab)=\\log a+\\log b\\)；\\(\\log(a/b)=\\log a-\\log b\\)；\\(\\log a^n = n\\cdot\\log a\\)" },
+  { id: "f17", unit: "exp", front: "換底公式", back: "\\(\\log_a b = \\log b / \\log a\\)（任何新底都行）；\\(\\log_a b \\cdot \\log_b a = 1\\)" },
+  { id: "f18", unit: "exp", front: "正整數 N 的位數", back: "位數 \\(= \\lfloor\\log_{10}N\\rfloor + 1\\)" },
+  { id: "f19", unit: "exp", front: "\\(y=a^x\\) 與 \\(y=\\log_a x\\) 必過的點", back: "\\(a^x\\) 過 \\((0,1)\\)；\\(\\log_a x\\) 過 \\((1,0)\\)；兩圖形對 \\(y=x\\) 對稱" },
+  { id: "f20", unit: "seq", front: "等差數列 \\(a_n\\) 與前 \\(n\\) 項和", back: "\\(a_n = a_1+(n-1)d\\)；\\(S_n = n(a_1+a_n)/2\\)" },
+  { id: "f21", unit: "seq", front: "等比數列 \\(a_n\\) 與前 \\(n\\) 項和", back: "\\(a_n = a_1\\cdot r^{n-1}\\)；\\(S_n = a_1(1-r^n)/(1-r)\\)（\\(r\\ne 1\\)）" },
+  { id: "f22", unit: "seq", front: "\\(1+2+\\cdots+n\\) 與 \\(1^2+2^2+\\cdots+n^2\\)", back: "\\(n(n+1)/2\\)；\\(n(n+1)(2n+1)/6\\)" },
+  { id: "f24", unit: "comb", front: "\\(C(n,k)\\) 與 \\(P(n,k)\\) 的公式", back: "\\(C(n,k)=n!/(k!(n-k)!)\\)；\\(P(n,k)=n!/(n-k)!\\)；\\(C(n,k)=C(n,n-k)\\)" },
+  { id: "f25", unit: "comb", front: "環狀排列", back: "\\(n\\) 人圍圓桌 \\(= (n-1)!\\)" },
+  { id: "f26", unit: "comb", front: "重複組合 H", back: "\\(H(n,k) = C(n+k-1, k)\\)（\\(n\\) 類選 \\(k\\) 個可重複）" },
+  { id: "f27", unit: "comb", front: "二項式定理的一般項", back: "\\((x+y)^n\\) 的一般項 \\(= C(n,k)\\cdot x^{n-k}\\cdot y^k\\)" },
+  { id: "f28", unit: "comb", front: "取捨原理（兩集合）", back: "\\(|A\\cup B| = |A|+|B|-|A\\cap B|\\)" },
+  { id: "f29", unit: "prob", front: "條件機率", back: "\\(P(A|B) = \\frac{P(A\\cap B)}{P(B)}\\)" },
+  { id: "f30", unit: "prob", front: "獨立事件的判定", back: "\\(A\\)、\\(B\\) 獨立 \\(\\iff P(A\\cap B) = P(A)\\cdot P(B)\\)" },
+  { id: "f31", unit: "prob", front: "期望值", back: "\\(E = \\sum\\)（值 × 機率）" },
+  { id: "f32", unit: "data", front: "資料全部做 \\(ax+b\\) 變換後，平均與標準差？", back: "平均 \\(\\to a\\mu+b\\)；標準差 \\(\\to |a|\\sigma\\)（平移不改變標準差）" },
+  { id: "f33", unit: "data", front: "相關係數 \\(r\\) 的範圍與迴歸直線必過點", back: "\\(-1 \\le r \\le 1\\)；迴歸直線必過 \\((\\bar{x}, \\bar{y})\\)" },
+  { id: "f34", unit: "trig1", front: "\\(\\sin/\\cos/\\tan\\) \\(30^\\circ\\)、\\(45^\\circ\\)、\\(60^\\circ\\)", back: "\\(\\sin\\): \\(\\frac{1}{2}\\)、\\(\\frac{\\sqrt{2}}{2}\\)、\\(\\frac{\\sqrt{3}}{2}\\)｜\\(\\cos\\): \\(\\frac{\\sqrt{3}}{2}\\)、\\(\\frac{\\sqrt{2}}{2}\\)、\\(\\frac{1}{2}\\)｜\\(\\tan\\): \\(\\frac{\\sqrt{3}}{3}\\)、\\(1\\)、\\(\\sqrt{3}\\)" },
+  { id: "f35", unit: "trig1", front: "平方關係與商數關係", back: "\\(\\sin^2\\theta+\\cos^2\\theta=1\\)；\\(\\tan\\theta = \\frac{\\sin\\theta}{\\cos\\theta}\\)" },
+  { id: "f36", unit: "trig1", front: "正弦定理", back: "\\(\\frac{a}{\\sin A} = \\frac{b}{\\sin B} = \\frac{c}{\\sin C} = 2R\\)（\\(R=\\)外接圓半徑）" },
+  { id: "f37", unit: "trig1", front: "餘弦定理", back: "\\(c^2 = a^2+b^2-2ab\\cdot\\cos C\\)（求邊）；\\(\\cos C = \\frac{a^2+b^2-c^2}{2ab}\\)（求角）" },
+  { id: "f38", unit: "trig1", front: "三角形面積（兩邊夾角）與海龍公式", back: "面積 \\(= \\frac{1}{2}ab\\cdot\\sin C\\)；海龍 \\(= \\sqrt{s(s-a)(s-b)(s-c)}\\)，\\(s=\\)半周長" },
+  { id: "f39", unit: "trig1", front: "\\(\\sin(180^\\circ-\\theta)\\)、\\(\\cos(180^\\circ-\\theta)\\)", back: "\\(\\sin(180^\\circ-\\theta)=\\sin\\theta\\)；\\(\\cos(180^\\circ-\\theta)=-\\cos\\theta\\)（補角）" },
+  { id: "f40", unit: "trig2", front: "和角公式 \\(\\sin(A\\pm B)\\)、\\(\\cos(A\\pm B)\\)", back: "\\(\\sin(A\\pm B)=\\sin A\\cos B\\pm\\cos A\\sin B\\)；\\(\\cos(A\\pm B)=\\cos A\\cos B\\mp\\sin A\\sin B\\)（\\(\\cos\\) 符號相反）" },
+  { id: "f41", unit: "trig2", front: "倍角公式", back: "\\(\\sin 2\\theta = 2\\sin\\theta\\cos\\theta\\)；\\(\\cos 2\\theta = \\cos^2\\theta - \\sin^2\\theta = 2\\cos^2\\theta - 1 = 1 - 2\\sin^2\\theta\\)" },
+  { id: "f42", unit: "trig2", front: "疊合 \\(a\\cdot\\sin\\theta + b\\cdot\\cos\\theta\\)", back: "\\(= \\sqrt{a^2+b^2}\\cdot\\sin(\\theta+\\varphi)\\)，最大值 \\(\\sqrt{a^2+b^2}\\)、最小值 \\(-\\sqrt{a^2+b^2}\\)" },
+  { id: "f43", unit: "trig2", front: "\\(y = \\sin(bx)\\) 的週期", back: "\\(2\\pi/|b|\\)（tan 的週期是 \\(\\pi/|b|\\)）" },
+  { id: "f44", unit: "vec", front: "內積的兩種算法", back: "\\(a\\cdot b = |a||b|\\cos\\theta = x_1 x_2 + y_1 y_2\\)" },
+  { id: "f45", unit: "vec", front: "向量垂直與平行的判定", back: "垂直 \\(\\iff\\) 內積\\(=0\\)；平行 \\(\\iff x_1 y_2 - x_2 y_1 = 0\\)" },
+  { id: "f46", unit: "vec", front: "正射影向量", back: "\\(a\\) 在 \\(b\\) 上的正射影 \\(= (a\\cdot b/|b|^2)\\cdot b\\)；長度 \\(= |a\\cdot b|/|b|\\)" },
+  { id: "f47", unit: "vec", front: "兩向量張出的三角形面積", back: "\\((1/2)|x_1 y_2 - x_2 y_1|\\)（平行四邊形不除 2）" },
+  { id: "f48", unit: "vec", front: "分點公式（\\(AP:PB = m:n\\)）", back: "\\(P = (n\\cdot A + m\\cdot B)/(m+n)\\)——靠近誰，誰的權重反而小" },
+  { id: "f49", unit: "vec", front: "三角形重心（向量）", back: "\\(G = (A+B+C)/3\\)" },
+  { id: "f50", unit: "vec", front: "柯西不等式（二維）", back: "\\((a^2+b^2)(c^2+d^2) \\ge (ac+bd)^2\\)；等號 \\(\\iff ad=bc\\)（平行時）" },
+  { id: "f51", unit: "svec", front: "空間兩點距離", back: "\\(\\sqrt{\\Delta x^2 + \\Delta y^2 + \\Delta z^2}\\)" },
+  { id: "f52", unit: "svec", front: "外積的幾何意義", back: "\\(|a\\times b| =\\) 兩向量張出的平行四邊形面積；方向依右手定則、同時垂直 \\(a\\) 與 \\(b\\)" },
+  { id: "f53", unit: "splane", front: "平面 \\(ax+by+cz=d\\) 的法向量", back: "\\((a, b, c)\\)——係數直接讀" },
+  { id: "f54", unit: "splane", front: "點到平面距離", back: "\\(\\frac{|ax_0+by_0+cz_0-d|}{\\sqrt{a^2+b^2+c^2}}\\)" },
+  { id: "f55", unit: "splane", front: "兩平面的夾角", back: "＝兩法向量的夾角（取銳角）；平行 \\(\\iff\\) 法向量平行" },
+  { id: "f56", unit: "svec", front: "三垂線定理", back: "平面外一點的斜線在平面上的投影若垂直平面內某直線，則斜線本身也垂直該直線（垂直投影 \\(\\Rightarrow\\) 垂直斜線）" },
+  { id: "f57", unit: "mat", front: "二階行列式與面積放大率", back: "\\(\\det = ad-bc\\)；線性變換把面積放大 \\(|\\det|\\) 倍" },
+  { id: "f58", unit: "mat", front: "二階反矩陣", back: "\\(\\frac{1}{ad-bc}\\cdot\\begin{bmatrix} d & -b \\\\ -c & a \\end{bmatrix}\\)——主對角線互換、副對角線變號" },
+  { id: "f59", unit: "mat", front: "旋轉 \\(\\theta\\) 的矩陣", back: "\\(\\begin{bmatrix} \\cos\\theta & -\\sin\\theta \\\\ \\sin\\theta & \\cos\\theta \\end{bmatrix}\\)" },
+  { id: "f60", unit: "mat", front: "轉移矩陣的特徵", back: "每一行（欄）的和 \\(= 1\\)、元素皆 \\(\\ge 0\\)；穩定狀態＝乘再多次也不變的分布" },
+  { id: "f61", unit: "line", front: "平行四邊形對角線性質", back: "互相平分（交點是兩對角線中點）" },
+  { id: "f62", unit: "line", front: "三角形兩邊中點連線", back: "平行第三邊、長度是第三邊的一半" },
+  { id: "f63", unit: "prob", front: "至少一次的機率", back: "\\(P(\\text{至少一次}) = 1 - P(\\text{一次都沒有})\\)——「至少」先想補集" },
+  { id: "f64", unit: "num", front: "\\(\\sqrt{a}\\cdot\\sqrt{b}\\) 與 \\(\\sqrt{a^2 b}\\) 的化簡", back: "\\(\\sqrt{48} = \\sqrt{16\\cdot 3} = 4\\sqrt{3}\\)——先抓最大平方因數" },
+  { id: "f65", unit: "exp", front: "\\(2^{10} \\approx ?\\)（常用近似）", back: "\\(2^{10} = 1024 \\approx 10^3\\)；\\(\\log_{10} 2 \\approx 0.3010\\)、\\(\\log_{10} 3 \\approx 0.4771\\)" },
+  { id: "f66", unit: "data", front: "中位數/四分位數要先做什麼？", back: "先排序！\\(Q_1\\)、\\(Q_3\\) 分別是前半、後半的中位數；\\(\\text{IQR} = Q_3 - Q_1\\)" },
 ];
 
 /* 把數值答案的生成題自動變成 4 選 1（手機純按鈕用） */
@@ -1962,10 +1951,10 @@ function flashShow() {
       <span class="shr"><button class="btn sm xbtn" onclick="exitFlow()">✕</button></span></div>
     <div class="card flashcard" onclick="flashFlip()">
       <p class="dim">${TOPICS[c.unit] || ''}</p>
-      <div class="flash-front">${rtTxt(escH(c.front))}</div>
+      <div class="flash-front">${rtTxt(c.front)}</div>
       <div id="flash-back" style="display:none">
-        <div class="flash-backtxt">${rtTxt(escH(c.back))}</div>
-        ${c.extra ? `<p class="dim flash-extra">${rtTxt(escH(c.extra))}</p>` : ''}
+        <div class="flash-backtxt">${rtTxt(c.back)}</div>
+        ${c.extra ? `<p class="dim flash-extra">${rtTxt(c.extra)}</p>` : ''}
       </div>
     </div>
     <div class="flash-btns" id="flash-btns"><button class="btn primary big" onclick="flashFlip()">翻面看答案</button></div>
