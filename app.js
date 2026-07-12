@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0712f'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0712g'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -1800,22 +1800,28 @@ function gradeLadder(acc) {
 /* 🗺️ 十四單元戰力地圖：範圍可視、點了就練 */
 function masteryMap() {
   const by = topicPriority().by;
+  const bankCnt = {};
+  for (const q of BANK) bankCnt[q.topic] = (bankCnt[q.topic] || 0) + 1; // 各單元題庫實有題數
+  let anyThin = false;
   const tiles = Object.keys(TOPICS).map((k) => {
     const t = by[k];
     const acc = t && t.n ? t.ok / t.n : null;
     const slow = t && t.target > 0 && t.ms / t.target > 1.2;
     const thin = t && t.n > 0 && t.n < 3;
+    const nq = bankCnt[k] || 0;
+    const scarce = nq < 6; // 題庫湊不滿一輪：別給「專攻 6 題」的空頭承諾
+    if (scarce) anyThin = true;
     const cls = acc == null ? 'na' : acc >= 0.8 ? 'g' : acc >= 0.6 ? 'y' : 'r';
-    return `<div class="tile ${cls}${thin ? ' thin' : ''}" onclick="startPracTopic('${k}')" title="專攻 ${TOPICS[k]} 6 題">
+    return `<div class="tile ${cls}${thin ? ' thin' : ''}${scarce ? ' scarce' : ''}" onclick="startPracTopic('${k}')" title="${scarce ? TOPICS[k] + '：題庫僅 ' + nq + ' 題' : '專攻 ' + TOPICS[k] + ' 6 題'}">
       <button class="tile-notes" onclick="event.stopPropagation();showUnitNotes('${k}')" title="單元重點">📚</button>
       <span class="tile-name">${TOPICS[k]}</span>
       <span class="tile-val">${acc == null ? '—' : Math.round(acc * 100) + '%'}${slow ? ' ⏱' : ''}</span>
-      <span class="tile-n">${t && t.n ? t.n + ' 筆' : '沒數據'}</span>
+      <span class="tile-n">${scarce ? `<span class="warnc">庫存 ${nq} 題</span>` : (t && t.n ? t.n + ' 筆' : '沒數據')}</span>
     </div>`;
   }).join('');
-  return `<div class="card"><h2>🗺️ 戰力地圖 <span class="dim">點單元＝立刻專攻 6 題</span></h2>
+  return `<div class="card"><h2>🗺️ 戰力地圖 <span class="dim">點單元＝專攻該單元</span></h2>
     <div class="tiles">${tiles}</div>
-    <p class="dim fs12">灰＝沒數據；<span class="badc">紅&lt;60%</span>、<span class="warnc">黃 60~79%</span>、<span class="okc">綠 ≥80%</span>（半透明＝樣本&lt;3）；⏱＝耗時比&gt;1.2；📚＝單元重點。</p></div>`;
+    <p class="dim fs12">灰＝沒數據；<span class="badc">紅&lt;60%</span>、<span class="warnc">黃 60~79%</span>、<span class="okc">綠 ≥80%</span>；⏱＝耗時比&gt;1.2；📚＝單元重點。${anyThin ? '<br><span class="warnc">「庫存 N 題」的單元題庫還很薄——這些單元的講義還沒匯入，之後補齊。</span>' : ''}</p></div>`;
 }
 /* 📚 單元重點 modal：匯入的參考書重點 + 該單元必背卡 + 老師方法庫入口 */
 function typesetIn(el) {
@@ -2030,7 +2036,7 @@ function renderHome() {
       <li>先量測：揪出耗時 2~3 倍的題型，不要籠統的「時間不夠」。</li>
       <li>基本運算練到反射，工作記憶留給難題。</li>
       <li>跳題紀律＋兩輪作答：會的題 100% 拿到。</li>
-      <li>目標雙線：73% 保底、80% 進攻——缺口大半是把「會但失分」收回來。</li>
+      <li>目標雙線：保底 73%（穩拿 13 級，門檻 72%）、進攻 80%（穩拿 14 級，門檻 78%）——缺口大半是把「會但失分」收回來。</li>
       <li>歷屆你全寫過、已失真 → 重製成類題在系統裡練；全真模擬＝補習班四次模考。本系統用到考前。</li>
     </ul>
   </details>`;
@@ -2076,7 +2082,8 @@ const DRILLS = {
     gen() {
       const b = pick([-8, -6, -4, -2, 2, 4, 6, 8]); const c = rint(-9, 9);
       const min = c - (b * b) / 4;
-      return { q: `y = x² ${b < 0 ? '−' : '+'} ${Math.abs(b)}x ${c < 0 ? '−' : '+'} ${Math.abs(c)} 的最小值 = ?`, kind: 'num', ans: String(min) };
+      const cs = c === 0 ? '' : ` ${c < 0 ? '−' : '+'} ${Math.abs(c)}`; // 常數項 0 就別印「+ 0」
+      return { q: `y = x² ${b < 0 ? '−' : '+'} ${Math.abs(b)}x${cs} 的最小值 = ?`, kind: 'num', ans: String(min) };
     } },
   rem: { name: '餘式定理', desc: 'f(x) 除以 (x−k)，答案就是 f(k)', target: 15,
     gen() {
@@ -2350,7 +2357,9 @@ function renderPhone() {
         <button class="btn primary" onclick="startPhoneFlash('formula')">抽 10 張</button></div>
       <div class="card drill-card"><b>🧑‍🏫 口訣快答</b>
         <p class="dim">看口訣選「它在解什麼」，答完看老師怎麼用。${supa && !syncState.user ? '<b class="warnc">需登入才能載入</b>' : ''}</p>
-        <button class="btn primary" onclick="startMnQuiz()">來 10 題</button></div>
+        ${supa && !syncState.user
+          ? '<button class="btn" onclick="nav(\'stats\')">登入後解鎖 →</button>'
+          : '<button class="btn primary" onclick="startMnQuiz()">來 10 題</button>'}</div>
     </div>
     ${p ? `<div class="card"><p>📅 今日手機練：<b>${p.n}</b> 題/卡｜答對/記得 <b>${p.ok}</b>（${p.n ? Math.round(100 * p.ok / p.n) : 0}%）</p></div>` : ''}
     ${hist.length ? `<div class="card"><h2>近幾輪</h2><table class="tbl"><tr><th>日期</th><th>模式</th><th>成績</th></tr>
@@ -3323,7 +3332,7 @@ function qResolve(ok) {
       ? `<div class="actr"><button class="btn" onclick="qRedoAgain()">📝 再算一次</button><button class="btn primary big" onclick="sideReturn()">↩ 回到原題</button></div>`
       : `<div class="actr"><button class="btn primary big" onclick="sideNext()">🎯 再來一題類題</button><button class="btn" onclick="sideReturn()">↩ 回到原題</button></div>`)
     : (!ok
-      ? `<p class="dim" style="margin:8px 0 4px">先標錯因（不會跳題——詳解看完再走）：</p><div class="chips r">${ERR_TYPES.slice(0, 4).map((e) => `<button class="chip${qsess.errPick === e ? ' sel' : ''}" onclick="qPickErr(this,'${e}')">${e}</button>`).join('')}</div><div class="actr" style="margin-top:8px"><button class="btn" onclick="qRedoStart()">📝 看解答重算一次</button><button class="btn" onclick="qSideStart()">🎯 先練一題類題</button><button class="btn primary big" id="errnext" ${qsess.errPick ? '' : 'disabled'} onclick="qFinish(false, ${ms}, qsess.errPick)">下一題 →</button></div>`
+      ? `<p class="dim" style="margin:8px 0 4px">先標錯因（不會跳題——詳解看完再走）：</p><div class="chips r">${ERR_TYPES.slice(0, 4).map((e) => `<button class="chip${qsess.errPick === e ? ' sel' : ''}" onclick="qPickErr(this,'${e}')">${e}</button>`).join('')}</div><div class="actr" style="margin-top:8px"><button class="btn" onclick="qRedoStart()">📝 看解答重算一次</button><button class="btn" onclick="qSideStart()">🎯 先練一題類題</button><button class="btn primary big" id="errnext" ${qsess.errPick ? '' : 'disabled'} onclick="qFinish(false, ${ms}, qsess.errPick)">${qsess.errPick ? '下一題 →' : '↑ 先選錯因'}</button></div>`
       : `<div class="actr"><button class="btn primary big" onclick="qFinish(true, ${ms}, ${overtime ? "'超時'" : 'null'})">下一題 →</button><button class="btn" onclick="qSideStart()">🎯 再練一題類題</button></div>`);
   // ④ 中段（批改的靈魂）：先肯定你做得好的 → 錯在哪（圈在你字上）→ 🧠 卡在哪 → 🎯 下次這樣做。詳解不塞這、收摺疊。
   const willProc = aiKey() && !v && qsess.proc && qsess.proc.n; // 選擇/打字題稍後由 AI 過程點評接手稱讚＋下次，這裡就不重複
@@ -3376,7 +3385,7 @@ function qPickErr(btn, e) {
   if (!qsess) return;
   qsess.errPick = e;
   if (btn && btn.parentElement) btn.parentElement.querySelectorAll('.chip').forEach((c) => c.classList.toggle('sel', c === btn));
-  const nx = $('#errnext'); if (nx) nx.disabled = false;
+  const nx = $('#errnext'); if (nx) { nx.disabled = false; nx.textContent = '下一題 →'; }
 }
 let qFinLock = false; // 重入鎖：擋掉「連點兩下下一題／錯因鈕」——第一下已把 qsess 換到下一題，第二下（脫離 DOM 的舊按鈕仍會觸發）會誤記下一題並跳過它
 function qFinish(ok, ms, err) {
@@ -3477,19 +3486,24 @@ function renderMockIntro() {
 }
 let mock = null;
 function buildPaper() {
-  const usedGrp = new Set(); // 題組去重：同卷不出同題組的兩小題（拆散又顛倒不像真考卷）
-  const byDiff = (d, n) => {
-    const pool = shuffle(BANK.filter((q) => q.diff === d && !(q.grp && usedGrp.has(q.grp))));
-    const picked = []; const used = new Set();
-    const take = (q) => { picked.push(q); used.add(q.topic); if (q.grp) usedGrp.add(q.grp); };
-    for (const q of pool) { // 儘量不同單元
-      if (picked.length >= n) break;
-      if (!used.has(q.topic) && !(q.grp && usedGrp.has(q.grp))) take(q);
-    }
-    for (const q of pool) { if (picked.length >= n) break; if (!picked.includes(q) && !(q.grp && usedGrp.has(q.grp))) take(q); }
-    return picked;
+  // 學測數A結構＝單選＋多選＋選填三段。講義 8 成是填充，純難度抽會抽出一整卷填充——
+  // 這裡先按「題型配額」抽（盡量 3 單選＋2 多選＋7 選填），配額不足才用別型補滿 12 題，
+  // 每型內部仍求難度分散、不同單元、題組不拆。
+  const usedGrp = new Set(), used = new Set(), picked = [];
+  const take = (q) => { if (picked.includes(q)) return false; picked.push(q); used.add(q.topic); if (q.grp) usedGrp.add(q.grp); return true; };
+  const avail = (q) => !picked.includes(q) && !(q.grp && usedGrp.has(q.grp));
+  // 難度排序器：同型內盡量涵蓋易中難、不同單元
+  const pickN = (pool, n) => {
+    pool = shuffle(pool).sort((a, b) => a.diff - b.diff);
+    let got = 0;
+    for (const q of pool) { if (got >= n) break; if (avail(q) && !used.has(q.topic)) { take(q); got++; } }
+    for (const q of pool) { if (got >= n) break; if (avail(q)) { take(q); got++; } }
+    return got;
   };
-  return shuffle([...byDiff(1, 5), ...byDiff(2, 5), ...byDiff(3, 2)]);
+  const quota = [['single', 3], ['multi', 2], ['fill', 7]];
+  for (const [type, n] of quota) pickN(BANK.filter((q) => q.type === type), n);
+  if (picked.length < 12) pickN(BANK.slice(), 12 - picked.length); // 某型不夠就用任何型補滿
+  return shuffle(picked.slice(0, 12));
 }
 function startMock() {
   if (!syncGate()) return;
@@ -3657,8 +3671,8 @@ function mockJudgePanel(list) {
     return `<div class="judge-item">
       <div class="judge-img">${img ? `<img src="${img}" alt="手寫過程">` : '<span class="dim">（沒有筆跡）</span>'}</div>
       <div class="judge-info">
-        <div class="wc-q fs13 dim" style="margin-bottom:4px">${rtTxt(q.q)}</div>
-        <p class="dim">${TOPICS[q.topic]}｜正解：<b class="big">${q.ans[0]}</b></p>
+        <div class="wc-q fs13 dim" style="margin-bottom:4px">${q.stem ? `<div class="bk-stem">${rtTxt(q.stem)}</div>` : ''}${rtTxt(q.q)}</div>
+        <p class="dim">${TOPICS[q.topic]}｜正解：<b class="big">${q.type === 'fill' ? mDispOpt(String(q.ans[0])) : q.ans.map((a) => `(${a + 1})`).join('')}</b></p>
         <div id="jai-${i}"></div>
         <div class="actr"><button class="btn sm err" id="jbad-${i}" onclick="mockJudgeSet(${i}, false)">✗ 錯</button>
         <button class="btn sm okb" id="jok-${i}" onclick="mockJudgeSet(${i}, true)">✓ 對</button></div>
@@ -3774,7 +3788,7 @@ function mockFinal() {
     <tr><td>${TOPICS[x.q.topic]} ${starF(x.q.diff)}</td>
     <td>${x.ok ? '✔' : x.answered ? '✘' : '⊘'}</td>
     <td>${escH(x.yourAns)}</td>
-    <td>${x.q.type === 'fill' ? x.q.ans[0] : x.q.ans.map((a) => `(${a + 1})`).join('')}</td>
+    <td>${x.q.type === 'fill' ? mDispOpt(String(x.q.ans[0])) : x.q.ans.map((a) => `(${a + 1})`).join('')}</td>
     <td class="${x.ms > x.target ? 'badc' : ''}">${fmtSec(x.ms)}/${fmtSec(x.target)}</td></tr>`).join('');
   app().innerHTML = `
     <h1>模擬結果 — ${mock.reason}</h1>
@@ -3847,12 +3861,12 @@ function wrongCard(id) {
   const histLine = hist.map((a) => `<span class="${a.ok ? 'okc' : 'badc'}" title="${a.d}｜${fmtSec(a.ms || 0)}">${a.ok ? '✔' : '✘'}</span>`).join(' ');
   return `<details class="card wcard ${isDue ? 'due' : ''}">
     <summary>
-      <span class="wc-meta">${TOPICS[q.topic]}｜${starF(q.diff) || '☆'}｜<span class="badc">錯 ${w.fails} 次</span>${w.err ? `｜${w.err}` : ''}${q.fig ? '｜📐' : ''}</span>
+      <span class="wc-meta">${TOPICS[q.topic]}｜${starF(q.diff) || '☆'}｜${w.fails > 0 ? `<span class="badc">錯 ${w.fails} 次</span>` : '<span class="warnc">放棄/未作答</span>'}${w.err ? `｜${w.err}` : ''}${q.fig ? '｜📐' : ''}</span>
       <span class="wc-due">${isDue ? '<b class="warnc">今天到期</b>' : escH(w.due || '')}</span>
     </summary>
     <div class="wc-body">
-      <div class="wc-q">${rtTxt(q.q)}${q.fig ? `<div class="qfig">${q.fig}</div>` : ''}</div>
-      <p class="dim fs13">離畢業 <span class="itv-ladder">${ladder}</span>（1→3→7→14 天四關）｜最近：${histLine || '—'}</p>
+      <div class="wc-q">${q.stem ? `<div class="bk-stem">${rtTxt(q.stem)}</div>` : ''}${rtTxt(q.q)}${q.fig ? `<div class="qfig">${q.fig}</div>` : ''}${q.type !== 'fill' && q.opts ? `<div class="bk-opts">${q.opts.map((o, i) => `<div class="bk-opt"><span class="bk-op">(${i + 1})</span><span>${rtTxt(o)}</span></div>`).join('')}</div>` : ''}</div>
+      <p class="dim fs13">正解：<b>${q.type === 'fill' ? mDispOpt(String(q.ans[0])) : q.ans.map((a) => `(${a + 1})`).join('')}</b>｜離畢業 <span class="itv-ladder">${ladder}</span>（1→3→7→14 天四關）｜最近：${histLine || '—'}</p>
       ${w.adv && w.adv.fe ? `<p class="badc">✘ 上次你這裡跑掉了：${escH(w.adv.fe)}</p>` : ''}
       ${w.adv && w.adv.nt ? `<div class="next-step"><b>🎯 下次這樣做：</b>${escH(w.adv.nt)}</div>` : (q.tip ? `<p class="tip">💡 ${rtTxt(q.tip)}</p>` : '')}
       <div class="chips r fs13">${ERR_TYPES.map((e) => `<button class="chip ${w.err === e ? 'sel' : ''}" onclick="setWrongErr('${jsA(id)}','${e}',this)">${e}</button>`).join('')}</div>
@@ -3910,8 +3924,8 @@ function wfShow() {
     <div class="session-head"><span>🃏 衝刺複習｜${wflash.i + 1} / ${wflash.ids.length}｜${TOPICS[q.topic]}</span>
       <span class="shr"><button class="btn sm xbtn" onclick="exitFlow()">✕</button></span></div>
     <div class="card flashcard" onclick="wfFlip()">
-      <p class="dim">${w.err || ''}｜錯 ${w.fails} 次</p>
-      <div class="wc-q" style="text-align:left">${rtTxt(q.q)}${q.fig ? `<div class="qfig">${q.fig}</div>` : ''}</div>
+      <p class="dim">${w.err || ''}｜${w.fails > 0 ? '錯 ' + w.fails + ' 次' : '放棄/未作答'}</p>
+      <div class="wc-q" style="text-align:left">${q.stem ? `<div class="bk-stem">${rtTxt(q.stem)}</div>` : ''}${rtTxt(q.q)}${q.fig ? `<div class="qfig">${q.fig}</div>` : ''}${q.type !== 'fill' && q.opts ? `<div class="bk-opts">${q.opts.map((o, i) => `<div class="bk-opt"><span class="bk-op">(${i + 1})</span><span>${rtTxt(o)}</span></div>`).join('')}</div>` : ''}</div>
       <div id="wf-back" style="display:none;text-align:left">
         <p>正解：<b class="accent big">${q.type === 'fill' ? mDispOpt(String(q.ans[0])) : q.ans.map((a) => `(${a + 1}) ${q.opts ? rtTxt(q.opts[a]) : ''}`).join('、')}</b></p>
         ${w.adv && w.adv.fe ? `<p class="badc">上次你這裡跑掉了：${escH(w.adv.fe)}</p>` : ''}
@@ -4028,10 +4042,10 @@ function renderStats() {
     .map((k) => ({ k, ...byTopic[k], acc: byTopic[k].ok / byTopic[k].n, speed: byTopic[k].ms / byTopic[k].target }))
     .sort((a, b) => (a.acc - b.acc) || (b.speed - a.speed));
   const atk = attackList(); // 沒寫過的更危險：優先攻擊要包含沒摸過的單元；點了直接開 8 題
-  // 73%＝13 級保底線、80%＝14 級進攻線：刻度直接釘在每條橫條上
+  // 72%＝13 級門檻、78%＝14 級門檻（GRADE_TABLE 實值）：刻度直接釘在每條橫條上
   const bars = topicRows.map((t) => `
     <div class="bar-row"><span class="bar-label">${TOPICS[t.k]} <span class="dim">(${t.n}題)</span></span>
-      <div class="bar"><div class="bar-fill ${t.acc >= 0.8 ? 'g' : t.acc >= 0.73 ? 't' : t.acc >= 0.6 ? 'y' : 'r'}" style="width:${(t.acc * 100).toFixed(0)}%"></div><i class="tick t73"></i><i class="tick t80"></i></div>
+      <div class="bar"><div class="bar-fill ${t.acc >= 0.78 ? 'g' : t.acc >= 0.72 ? 't' : t.acc >= 0.6 ? 'y' : 'r'}" style="width:${(t.acc * 100).toFixed(0)}%"></div><i class="tick t72"></i><i class="tick t78"></i></div>
       <span class="bar-val">${(t.acc * 100).toFixed(0)}%｜速度 ${t.speed > 1 ? '<b class="badc">' : '<b class="okc">'}${t.speed.toFixed(2)}×</b></span>
     </div>`).join('');
   // 錯因統計
@@ -4127,7 +4141,7 @@ function renderStats() {
     ${atk.length ? `<div class="card warn"><b>本週優先攻擊</b> <span class="dim">點單元＝直接開 8 題</span>
       <div class="chips">${atk.map((a) => `<button class="chip" onclick="startPracTopics(['${a.k}'],8)">${TOPICS[a.k]} <span class="dim">${a.reason}</span></button>`).join('')}</div></div>` : ''}
     <div class="card"><h2>單元答對率與速度比 <span class="dim">速度比 >1× ＝ 吃時間</span></h2>${bars}
-      <p class="dim fs12">直線刻度＝73%（13 級保底）與 80%（14 級進攻）。</p></div>
+      <p class="dim fs12">直線刻度＝72%（13 級門檻）與 78%（14 級門檻）；策略上抓高一點——保底 73%、進攻 80%。</p></div>
     <div class="card"><h2>錯因分布 → 對症處方</h2>${errBars}${advice ? `<ul>${advice}</ul>` : ''}</div>
     ${procCard}
     ${drillRows ? `<div class="card"><h2>速度特訓進度</h2><table class="tbl"><tr><th>項目</th><th>輪數</th><th>中位數變化</th><th>狀態</th></tr>${drillRows}</table></div>` : ''}
