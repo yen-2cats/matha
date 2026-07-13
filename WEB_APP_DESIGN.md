@@ -1,7 +1,20 @@
 # 數A 特訓系統 — Web App 系統設計（交接文件）
 
 > 2026-07-09 建立。給接手開發 app 的模型：這份講**程式本身的架構、資料模型、功能系統、修改與部署方式**。內容生產線（題庫/類題/蒸餾）看 OPERATIONS.md。戰略與診斷看 README.md。
-> **最新完整交接在桌面 `HANDOFF_數A_0712h.md`**（含五輪 QA、十本講義進料、還沒做的三步）。
+> **最新完整交接在桌面 `HANDOFF_數A_0713d.md`**（含全系統健檢 24 findings、零 CDN 架構、保留清單、仍待飼主的步驟）。舊版 `HANDOFF_數A_0712h.md` 保留為歷史。
+
+## ⚡ 0713a–0713d 健檢與修復摘要（2026-07-13，最新，先讀這段）
+
+一輪全系統健檢（後端/前端/UX 12 維度多agent 審查 + 每條對抗式查證 → 24 findings），修掉並上線 **20 條**，版本 `0712h` → **`0713d`**（兩站 matha13 + matha，每項真瀏覽器驗證）。關鍵變動：
+
+- **全站零 CDN、真離線**：KaTeX 0.16.11 與 Supabase 都**自架同源** → `vendor/katex/{katex.min.js,katex.min.css,auto-render.min.js,fonts/*.woff2 × 20}`、`vendor/supabase.js`（2.110.2 UMD）。index.html 無任何 `cdn.jsdelivr` 連結。**更新這兩個庫＝重新下載對應 dist 檔覆蓋 `vendor/`**（KaTeX 字型從 css 的 `url(fonts/*.woff2)` 清單抓，只需 woff2）。`sw.js` SHELL 預快取 KaTeX js/css，字型由 fetch handler 首次線上渲染時快取；`CACHE` 目前 `matha13-v9`。
+- **匯入內容 XSS 防護**：`rtTxt` 先過 `sanitizeContent`（切 `\(…\)` 島原封交 KaTeX、只白名單清洗島外散文 `<br>/<b>`＋剝屬性）；`fig`/`solFig` 過 `sanitizeSVG`。**改內容渲染別破壞「島不動、散文清洗」的分工**（實測全庫散文只用 `<br>/<b>`、零屬性）。
+- **`today()` 改台灣本地日**（`Date.now()+8h`）：清晨/熬夜作答不再歸錯日、streak/每日目標/到期錯題不再錯位。**別退回 `toISOString()` UTC**。
+- **內容分家同步**：`pullContent` 超集會 bump rev 回推、rev 相同才略過（本地較新也拉回合併）；`migrateContentFromS` 已 **async**、先 `await persistContent()`（回傳 bool）確認落地才刪 `S.ext*`。
+- **配對連結改 session 權杖**（access+refresh，可登出撤銷、會過期）取代明文帳密；syncCard 有「📱 產生配對連結」鈕；`autoLoginFromHash` 相容舊 `base64(email|密碼)`。
+- **其他**：`load()` 驗形狀防壞資料白屏（壞值備份到 `_corrupt`）、`exportData` 剝 `aikey`、備份還原 `idbWriteAll` 先 clear、SW network-first 加 3.5s 逾時、PWA controllerchange 更新提示、viewport 解鎖縮放、ink 死指（`lostpointercapture`）/回放尺寸重算、登入 Enter 送出、`praiseFor` 個人最速只算答對、卡點靛藍收進 `--insight` token、模考補 `ts` 去重。
+- **刻意保留（非 bug）**：#13 手機單指在整卡書寫面既畫不了也捲不動（改動會傷觸控筆主作答面）、#18 `attempts` 無上限成長（需歸檔架構，雲端鏡像下無丟資料）、#19 開放自助註冊（飼主評估後接受——URL 未宣傳、最壞只是免費層被灌爆可偵測可復原）。
+- 完整逐條報告見桌面 `HANDOFF_數A_0713d.md` 與健檢 artifact。
 
 ## ⚡ 0712d–0712h 摘要（2026-07-12/13，接在 0712a 之後）
 - **0712d 內容/狀態分家**：題庫/重點/公式卡進 `CONTENT.packs`（IndexedDB＋雲端 content_packs 表），S 只剩輕狀態；存取走 `extBankArr/extFlashArr/extNotesArr`；`probeContent` 偵測表→啟用+`migrateContentFromS` 遷移；表沒建則維持舊行為（進 S.extbank）零風險降級。
