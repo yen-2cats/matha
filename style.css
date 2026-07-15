@@ -233,11 +233,9 @@ label.opt.block input { margin-right: 8px; accent-color: var(--accent); }
    漸層底讓鈕在手寫上也讀得到；批改完成時上面的 :has(.graded) 規則照樣把它收起。 */
 .qcard.booklet.sheet .ansarea { padding: 18px 16px 12px; position: sticky; bottom: 0; z-index: 4; background: linear-gradient(to top, var(--paper) 60%, transparent); }
 .qcard.booklet.sheet #qfb:not(:empty), .qcard.booklet.sheet #dfb:not(:empty) { padding: 8px 16px; background: var(--panel); }
-/* 批改「完成」（#qfb 出現 .graded 最終結果）才收起書寫層＋作答鈕；「批改中…」和自評（正解對照）時手算照樣看得到，不會消失 */
-.qcard.booklet.sheet:has(#qfb .graded) .sheet-tools,
-.qcard.booklet.sheet:has(#qfb .graded) .write-pad,
-.qcard.booklet.sheet:has(#qfb .graded) .ansarea,
-.qcard.booklet.sheet:has(#qfb .graded) #ink-cv { display: none; }
+/* 批改「完成」後：只收起作答鈕（避免重複送出）；書寫層/畫布/工具列「保留」——AI 的紅框畫在你原字上（對得到位置），
+   而且你還能繼續加新的手寫（邊看 AI 講的邊寫，新增的字不再批改）。「下一題」在 #qfb 裡照樣可點（已抬到畫布上層）。 */
+.qcard.booklet.sheet:has(#qfb .graded) .ansarea { display: none; }
 /* 回放解題過程時掀開書寫層（覆蓋上面的收起） */
 .qcard.booklet.sheet.replaying .write-pad, .qcard.booklet.sheet.replaying #ink-cv { display: block !important; }
 /* 書寫層畫布：絕對定位蓋滿整卡 */

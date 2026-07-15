@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0713m'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0713n'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -608,10 +608,52 @@ function inkMark(qid, ok, ansText) {
   (st.m = st.m || []).push(m);
   inkDrawMark(cv.getContext('2d'), m, cv.clientWidth, cv.clientHeight);
 }
+/* AI 批改的框（v.marks，0~1 相對批改圖）→ 映射回畫布座標，直接畫在你原字上（不清空、對得到位置） */
+function inkAiMarks(qid, marks, box) {
+  const st = sessionInk[qid];
+  if (!st || !box || !Array.isArray(marks)) return 0;
+  st.m = (st.m || []).filter((m) => m.type !== 'box'); // 重批時先清舊 AI 框，避免疊加
+  let n = 0;
+  for (const mk of marks.slice(0, 3)) {
+    const b = mk && mk.box;
+    if (!Array.isArray(b) || b.length !== 4) continue;
+    let [ux0, uy0, ux1, uy1] = b.map(Number);
+    if (![ux0, uy0, ux1, uy1].every((v) => v >= 0 && v <= 1) || !(ux1 > ux0) || !(uy1 > uy0)) continue;
+    const g = 0.02; ux0 = Math.max(0, ux0 - g); uy0 = Math.max(0, uy0 - g); ux1 = Math.min(1, ux1 + g); uy1 = Math.min(1, uy1 + g);
+    st.m.push({ t: Date.now(), type: 'box', label: mk.label ? String(mk.label).slice(0, 12) : '',
+      x0: box.x0 - box.pad + ux0 * box.w, y0: box.y0 - box.pad + uy0 * box.h,
+      x1: box.x0 - box.pad + ux1 * box.w, y1: box.y0 - box.pad + uy1 * box.h });
+    n++;
+  }
+  return n;
+}
+/* 批改後：把 AI 框畫在原字上、恢復畫布可書寫（新增的字不再批改）。書寫層保留＝對得到位置、能邊看邊寫。 */
+function resumeWithMarks(qid, marks, box) {
+  if (marks && box) inkAiMarks(qid, marks, box);
+  const cv = $('#ink-cv');
+  if (!cv || !sessionInk[qid]) return;
+  if (!ink || ink.qid !== qid) inkStart(qid, Date.now(), 0); // 恢復書寫：since=0→既有筆跡與批改標記全部保留、不歸檔
+  else inkRedrawAll();
+}
 function inkDrawMark(ctx, m, cw, ch) {
   ctx.save();
   ctx.strokeStyle = INK_COLORS.r; ctx.fillStyle = INK_COLORS.r;
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  if (m.type === 'box') { // AI 圈錯：紅橢圓框在原字上 ＋ 標籤
+    ctx.lineWidth = 2.6;
+    const cx = (m.x0 + m.x1) / 2, cyb = (m.y0 + m.y1) / 2, rx = Math.max(9, (m.x1 - m.x0) / 2), ry = Math.max(9, (m.y1 - m.y0) / 2);
+    ctx.beginPath(); ctx.ellipse(cx, cyb, rx, ry, 0, 0, 2 * Math.PI); ctx.stroke();
+    if (m.label) {
+      let fs = 13; ctx.font = `600 ${fs}px system-ui, sans-serif`;
+      const tw = ctx.measureText(m.label).width;
+      let tx = m.x0, ty = m.y0 - 6;
+      if (ty < fs + 2) ty = m.y1 + fs + 4;
+      if (tx + tw + 6 > cw) tx = Math.max(4, cw - tw - 6);
+      ctx.fillStyle = 'rgba(225,29,72,0.92)'; ctx.fillRect(tx - 3, ty - fs, tw + 6, fs + 5);
+      ctx.fillStyle = '#fff'; ctx.fillText(m.label, tx, ty);
+    }
+    ctx.restore(); return;
+  }
   const cy = (m.y0 + m.y1) / 2;
   const size = m.ok ? 26 : 18;
   let bx = m.x1 + 12;
@@ -704,6 +746,7 @@ function inkCaptureFull(qid, asDataURL) {
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   for (const s of arr) inkDrawStroke(ctx, s, 2.2);
   inkCaptureFull.lastW = Math.round(w); // 手寫實際 CSS 寬（給批改結果照原大小顯示，不要硬撐成一格放大）
+  inkCaptureFull.lastBox = { x0, y0, pad, w, h }; // 筆跡外框（畫布 CSS 座標）：把 AI 的 0~1 框映射回原字位置，直接畫在畫布上
   const url = cv.toDataURL('image/png');
   return asDataURL ? url : url.split(',')[1];
 }
@@ -1123,7 +1166,7 @@ function qProcReview(ok) {
   const q = sess.q;
   const calcB64 = inkCaptureFull(q.id); // 題卡＋計算區整卷一起分析
   if (!calcB64) { const el = document.getElementById('ai-proc'); if (el) el.innerHTML = ''; return; }
-  const imgSrc = 'data:image/png;base64,' + calcB64; // 同一張圖，供畫紅圈
+  sess.markBox = inkCaptureFull.lastBox; // 筆跡外框：把 AI 框映射回畫布、畫在原字上
   const correctTxt = q.type === 'fill' ? q.ans[0] : q.ans.map((a) => `(${a + 1})`).join('');
   const shots = inkStuckShots(q.id, sess.t0); // 停頓證據圖：讓 AI 講出「他當時卡在哪」
   // 結果存在 session 上（sess.aiProcHTML），不靠 qsess 物件比對：類題支線把 qsess 換掉後，回原題（sideReturn）能重新貼上，不會卡在「正在看…」
@@ -1147,15 +1190,14 @@ function qProcReview(ok) {
       }
       if (stuck.length && sess.proc) sess.proc.stuck = stuck;
       if (adv || (stuck.length && sess.proc)) save();
-      const marked = Array.isArray(v.marks) && v.marks.length ? markedImgHTML(imgSrc, v.marks, v.firstError) : ''; // 有座標框就圈在手寫上
-      const handImg = marked || `<div class="ai-marked"><div class="am-wrap"><img src="${imgSrc}" alt="你的手算"></div></div>`; // 沒框（含答對、座標壞）也要秀手算——書寫層收起後這裡是唯一看得到手算的地方
+      // 手算改畫在「原本的書寫層」上（AI 紅框對得到位置、還能繼續加寫）——不再另貼截圖
       paint(`<div class="ai-fb"><p><b>🤖 AI 看你的手寫過程：</b></p>
         ${v.praise ? `<p class="praise">🎉 你做得好：${escH(v.praise)}</p>` : ''}
-        ${handImg}
-        ${!marked && v.firstError ? `<p class="badc"><b>你這裡跑掉了：</b>${escH(v.firstError)}</p>` : ''}
+        ${v.firstError ? `<p class="badc"><b>你這裡跑掉了：</b>${escH(v.firstError)}</p>` : ''}
         ${stuckHTML(stuck)}
         ${v.nextTime ? `<div class="next-step"><b>🎯 下次這樣做：</b>${escH(v.nextTime)}</div>` : ''}
-        ${!v.praise && !marked && !v.firstError && !v.nextTime && !stuck.length ? '<p class="dim">過程乾淨，沒什麼好挑的——這題你穩。</p>' : ''}</div>`);
+        ${!v.praise && !v.firstError && !v.nextTime && !stuck.length ? '<p class="dim">過程乾淨，沒什麼好挑的——這題你穩。</p>' : ''}</div>`);
+      if (qsess === sess) resumeWithMarks(q.id, v.marks, sess.markBox); // 把 AI 框畫在原字上、恢復書寫層可繼續加寫
     })
     .catch((e) => { paint(`<p class="dim">（AI 過程分析失敗：${escH((e && e.message) || e)}）</p>`); });
 }
@@ -3583,6 +3625,7 @@ function qGrade(optIdx) {
   const calcB64 = inkCaptureFull(q.id);
   qsess.calcImg = calcB64 ? 'data:image/png;base64,' + calcB64 : null; // 存起乾淨版：批改後在你的筆跡上畫紅圈
   qsess.calcImgW = inkCaptureFull.lastW || 480; // 手寫原始寬，批改結果照這寬顯示（不放大）
+  qsess.markBox = inkCaptureFull.lastBox; // 筆跡外框：批改後把 AI 的框映射回畫布、畫在原字上
   const _ord = inkOrderedShot(q.id); // 給 AI 的是「標了書寫順序＋答案框」版；顯示/紅圈仍用乾淨版（幾何一致，marks 對得準）
   const _st = sessionInk[q.id] || {};
   const _ns = (_st.s || []).filter((s) => !s.dead && !s.arch).length;
@@ -3733,15 +3776,11 @@ function qResolve(ok) {
   const stuckBlock = willProc ? '' : stuckHTML(qsess.stuck);
   // 你的手算圖：批改後書寫層會收起（畫布藏起來），所以把手算放進批改結果裡讓你還看得到——答錯有紅圈、答對就純手算。
   // 填充題 qGrade 已存 qsess.calcImg；其他有手寫的補抓一次。選擇題（willProc）改由 #ai-proc 顯示手算，這裡不重複。
-  if (!qsess.calcImg && qsess.proc && qsess.proc.n) { const _b = inkCaptureFull(q.id); qsess.calcImg = _b ? 'data:image/png;base64,' + _b : null; qsess.calcImgW = inkCaptureFull.lastW || 480; }
-  const imgW = qsess.calcImgW || 480; // 照手寫原始寬顯示（max-width:100% 兜住小螢幕），不再硬撐放大
-  const hasMarks = v && Array.isArray(v.marks) && v.marks.length;
-  const marked = hasMarks ? markedImgHTML(qsess.calcImg, v.marks, v.firstError, imgW) : ''; // 座標全無效時 markedImgHTML 回 ''
-  const plainImg = qsess.calcImg ? `<div class="ai-marked"><div class="am-wrap" style="width:${imgW}px"><img src="${qsess.calcImg}" alt="你的手算"></div></div>` : '';
-  const handImg = (qsess.calcImg && !willProc) ? (marked || plainImg) : ''; // 圈畫不出來(座標壞)時退回純手算圖，不讓手算消失
+  if (!qsess.calcImg && qsess.proc && qsess.proc.n) { const _b = inkCaptureFull(q.id); qsess.calcImg = _b ? 'data:image/png;base64,' + _b : null; qsess.calcImgW = inkCaptureFull.lastW || 480; qsess.markBox = inkCaptureFull.lastBox; }
+  const handImg = ''; // 手算改畫在「原本的書寫層」上（AI 紅框對得到位置、還能繼續加寫）——不再另貼一張截圖，你就對得到了
   let mid = '';
   if (!ok) {
-    const errLine = !marked && v && v.firstError ? `<p class="badc" style="margin:8px 0 4px"><b>你這裡跑掉了：</b>${escH(v.firstError)}</p>` : ''; // 有紅圈時 firstError 已是圈的說明；圈畫不出時退回文字錯誤行
+    const errLine = v && v.firstError ? `<p class="badc" style="margin:8px 0 4px"><b>你這裡跑掉了：</b>${escH(v.firstError)}</p>` : ''; // 畫布上的紅框圈「哪裡」，這行講「錯什麼」
     const method = !v ? `<div class="one-method"><b>一種最簡單的算法：</b>${rtTxt(q.sol)}${q.solFig ? `<div class="qfig">${sanitizeSVG(q.solFig)}</div>` : ''}</div>` : ''; // 沒 AI 看手寫時才補完整方法；詳解配圖（solFig）不過 rtTxt
     mid = `${praiseHTML}${handImg}${errLine}${lastAdv}${stuckBlock}${method}${nextHTML}`;
   } else if (overtime) {
@@ -3765,6 +3804,11 @@ function qResolve(ok) {
   if (aiKey() && !qsess.ai && qsess.proc && qsess.proc.n) {
     const el = document.getElementById('ai-proc');
     if (el) { el.innerHTML = '<p class="dim">🤖 AI 正在看你的手寫過程…（不用等，可先按下一題）</p>'; qProcReview(ok); }
+  }
+  // 批改後：把 AI 紅框畫在你原字上、恢復書寫層可繼續加寫（填充題現在就有 marks；選擇題稍後 qProcReview 補）。等版面(含 KaTeX)定下來再抓畫布高度。
+  if (qsess.proc && qsess.proc.n && qsess.calcImg) {
+    const _qid = q.id;
+    setTimeout(() => { if (qsess && qsess.q && qsess.q.id === _qid) resumeWithMarks(_qid, (qsess.ai && qsess.ai.marks) || null, qsess.markBox); }, 50);
   }
   mountChat(qsess); // 「追問這題」多輪對話區（有 context 記憶）
 }
