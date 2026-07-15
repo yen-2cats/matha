@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0713p'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0713q'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -135,28 +135,48 @@ async function idbWriteAll(packs) {
     tx.onerror = () => rej(tx.error);
   });
 }
-/* ── 錯題手寫存檔（IndexedDB errshots）：答錯當下的手寫圖留下來，日後統整「怎麼錯的」趨勢 ──
-   key＝qid|ts（對得回 S.attempts 那一筆）；圖大→放 IDB 不塞 localStorage；上限 400 張、超過刪最舊。 */
+/* ── 錯題手寫存檔（IndexedDB errshots）：這是最高優先資料之一，「不設 400 張硬上限」──
+   平時一張都不刪、盡量全留；只有本機儲存配額真的吃緊(>90%)才刪最舊的挪空間，並標記 errShotWarn 提醒升級。
+   （雲端 ink_sessions 才是永久無上限的權威檔案；本機這份是快取縮圖，供數據頁快速瀏覽。）
+   key＝qid|ts（對得回 S.attempts 那一筆）；圖大→放 IDB 不塞 localStorage。 */
+let errShotWarn = false; // 本機配額吃緊：數據頁提示「該升級/清空間」
 async function errShotSave(key, data) {
   try {
     const db = await idbOpen();
     await new Promise((res, rej) => { const tx = db.transaction('errshots', 'readwrite'); tx.objectStore('errshots').put(data, key); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); });
-    errShotPrune(400).catch(() => {});
-  } catch (e) {}
+    errShotPrune(false).catch(() => {});
+  } catch (e) {
+    errShotWarn = true; // 寫失敗＝多半配額爆了：挪空間後重試一次；仍失敗雲端 ink_sessions 照樣有這題手寫
+    try { await errShotPrune(true); const db = await idbOpen(); await new Promise((res) => { const tx = db.transaction('errshots', 'readwrite'); tx.objectStore('errshots').put(data, key); tx.oncomplete = res; tx.onerror = res; }); } catch (_) {}
+  }
 }
+async function errShotCount() { try { const db = await idbOpen(); return await new Promise((res) => { const rq = db.transaction('errshots').objectStore('errshots').count(); rq.onsuccess = () => res(rq.result); rq.onerror = () => res(0); }); } catch (e) { return 0; } }
 async function errShotAll() {
   try {
     const db = await idbOpen();
     return await new Promise((res) => { const out = []; const rq = db.transaction('errshots').objectStore('errshots').openCursor(); rq.onsuccess = () => { const c = rq.result; if (c) { out.push({ key: c.key, ...(c.value || {}) }); c.continue(); } else res(out); }; rq.onerror = () => res(out); });
   } catch (e) { return []; }
 }
-async function errShotPrune(max) {
+async function storageInfo() {
+  let usage = 0, quota = 0;
+  try { if (navigator.storage && navigator.storage.estimate) { const e = await navigator.storage.estimate(); usage = e.usage || 0; quota = e.quota || 0; } } catch (_) {}
+  return { usage, quota, count: await errShotCount(), warn: errShotWarn };
+}
+/* 只有配額真的吃緊(或寫爆 force)才刪；否則全留。HARD 只是防 cursor 無限長的保險，不是刻意上限。 */
+async function errShotPrune(force) {
+  let over = !!force;
+  try { if (navigator.storage && navigator.storage.estimate) { const e = await navigator.storage.estimate(); if (e.quota && e.usage / e.quota > 0.9) over = true; } } catch (_) {}
+  const HARD = 20000;
+  if (!over) { const c = await errShotCount(); if (c <= HARD) return; } // 空間夠：一張都不刪、全留
+  errShotWarn = true;
   const all = await errShotAll();
-  if (all.length <= max) return;
   all.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  const keep = over ? Math.floor(all.length * 0.85) : HARD; // 配額吃緊：只刪最舊 15% 挪空間
+  const delN = all.length - keep;
+  if (delN <= 0) return;
   const db = await idbOpen();
   const tx = db.transaction('errshots', 'readwrite'); const st = tx.objectStore('errshots');
-  for (let i = 0; i < all.length - max; i++) st.delete(all[i].key);
+  for (let i = 0; i < delN; i++) st.delete(all[i].key);
 }
 async function contentInit() {
   if (!splitOn()) return;
@@ -4661,10 +4681,14 @@ function errTrendCard() {
 async function loadErrShots() {
   const el = document.getElementById('errshots');
   if (!el) return;
+  const si = await storageInfo();
+  const mb = (b) => (b / 1048576).toFixed(0);
+  const near = si.warn || (si.quota && si.usage / si.quota > 0.85);
+  const status = `<p class="fs13 ${near ? 'warnc' : 'dim'}" style="margin:2px 0 6px">📦 本機已存 <b>${si.count}</b> 張手寫${si.quota ? `｜裝置用量 ${mb(si.usage)} / ${mb(si.quota)} MB` : ''}${near ? '——<b>本機空間吃緊，最舊的縮圖開始輪替</b>（雲端仍保留全部）。要全部留本機請清裝置空間，或升級雲端 DB。' : '（不設上限、盡量全留）'}<br><span class="dim">雲端 ink_sessions 永久保留你每一題的手寫筆跡、無上限——本機這份只是快取縮圖。</span></p>`;
   const all = await errShotAll();
-  if (!all.length) { el.innerHTML = '<p class="dim fs13">目前沒有存下的錯題手寫（之後答錯有手寫就會自動留下）。</p>'; return; }
+  if (!all.length) { el.innerHTML = status + '<p class="dim fs13">目前本機沒有存下的錯題手寫縮圖（之後答錯有手寫就會自動留下）。</p>'; return; }
   all.sort((a, b) => (b.ts || 0) - (a.ts || 0));
-  el.innerHTML = '<p class="dim fs13" style="margin:8px 0 4px">最近的錯題手寫（點看大圖＋錯在哪）：</p><div class="errshots-grid">'
+  el.innerHTML = status + '<p class="dim fs13" style="margin:8px 0 4px">最近的錯題手寫（點看大圖＋錯在哪）：</p><div class="errshots-grid">'
     + all.slice(0, 12).map((s) => `<figure class="errshot" onclick="errShotZoom('${escH(String(s.key))}')"><img src="${s.img}" alt="錯題手寫" loading="lazy"><figcaption>${escH(TOPICS[s.topic] || s.topic || '')}${s.k ? '｜' + escH(s.k) : (s.tag ? '｜' + escH(s.tag) : '')}<br><span class="dim">${escH(s.d || '')}</span></figcaption></figure>`).join('')
     + '</div>';
 }
@@ -5223,6 +5247,7 @@ async function boot() {
     `<button data-view="${v}" onclick="nav('${v}')">${VIEWS[v].label}</button>`).join('');
   if (!document.getElementById('day-counter')) { const dc = document.createElement('div'); dc.id = 'day-counter'; document.body.appendChild(dc); }
   renderDayCounter(); // 右上角常駐今日計數表
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); // 爭取持久儲存：手寫是高優先資料，別讓瀏覽器在空間壓力下清掉
   await contentInit(); // 分家啟用時從 IndexedDB 載內容（毫秒級；未啟用是 no-op）
   applyExtBank();
   aiKeyMigrate();
