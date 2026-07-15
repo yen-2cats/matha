@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0713l'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0713m'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -3445,6 +3445,7 @@ function bkCard(q, head, submitFn, actions) {
     <div class="sheet-tools"><b>✍️ 整張都能寫${q.type === 'fill' ? '，答案寫在最後、圈起來' : ''}</b>${inkToolsHTML()}</div>
     <div class="bk-item"><span class="bk-num">${bkNum(head)}</span>
       <div class="bk-content">${q.stem ? `<div class="bk-stem">${rtTxt(q.stem)}</div>` : ''}${rtTxt(q.q)}${q.fig ? `<div class="qfig">${sanitizeSVG(q.fig)}</div>` : ''}${bkOpts(q, submitFn)}</div></div>
+    <div id="qhint"></div>
     <div class="write-pad"></div>
     <div class="ansarea">${actions}</div>
     <div id="qfb"></div>
@@ -3457,13 +3458,14 @@ function renderQuestion(q, cfg) {
   qsess = { q, cfg, t0: Date.now(), warned: false, locked: false };
   const target = qTarget(q);
   const giveUp = `<button class="btn sm skip" onclick="qGiveUp()">🏳 放棄，看答案</button>`;
+  const hintBtn = aiKey() ? `<button class="btn sm" onclick="qHint()">💡 我卡關了</button>` : ''; // AI 看你手寫、給下一步提示（不給完整答案）
   let actions;
   if (q.type === 'single') {
-    actions = `<div class="actr">${giveUp}</div>`; // 點選項即作答
+    actions = `<div class="actr">${giveUp}${hintBtn}</div>`; // 點選項即作答
   } else if (q.type === 'multi') {
-    actions = `<div class="actr">${giveUp}<button class="btn primary" onclick="qSubmit()">送出（多選）</button></div>`;
+    actions = `<div class="actr">${giveUp}${hintBtn}<button class="btn primary" onclick="qSubmit()">送出（多選）</button></div>`;
   } else {
-    actions = `<div class="actr">${giveUp}<button class="btn primary big" onclick="qSubmit()">✅ 算完了，開始批改</button></div>
+    actions = `<div class="actr">${giveUp}${hintBtn}<button class="btn primary big" onclick="qSubmit()">✅ 算完了，開始批改</button></div>
       <details class="typed-opt"${typedOpen ? ' open' : ''} ontoggle="typedOpen=this.open"><summary class="dim">改用打字（選用）</summary>
       <input id="qin" class="ans-input" autocomplete="off" placeholder="輸入答案（分數用 a/b）" onkeydown="if(event.key==='Enter')qSubmit()"></details>`;
   }
@@ -3505,6 +3507,48 @@ function qGiveUp() {
   qsess.yourAns = '（放棄，看答案）';
   qsess.gaveUp = true;
   qResolve(false);
+}
+/* 💡 我卡關了：AI 看你「目前的手寫」，判斷方向可不可行→順著給下一步提示/抓算錯處，或建議換方向；絕不給完整答案。
+   可連按（每次看你最新進度、帶入先前提示避免重複）。不送出、不判分、不動計時。 */
+async function qHint() {
+  if (!qsess || qsess.locked || qsess.hintBusy) return;
+  const q = qsess.q;
+  if (!aiKey()) { qsess.hints = ['（要先到 📊 數據頁設定 AI key 才能用提示）']; renderHints(); return; }
+  const b64 = inkCaptureFull(q.id); // 目前手寫的即時快照（null＝還沒動筆）
+  qsess.hints = qsess.hints || [];
+  qsess.hintBusy = true;
+  renderHints();
+  try {
+    const correctTxt = q.type === 'fill' ? (q.ans && q.ans[0]) : (Array.isArray(q.ans) ? q.ans.map((a) => '(' + (a + 1) + ')').join('') : '');
+    const prior = qsess.hints.length ? '\n（你之前已提示過，接著往下、換個角度、別重複）：\n' + qsess.hints.map((h, i) => (i + 1) + '. ' + h).join('\n') : '';
+    const system = '你是陪考生即時解題的數學家教。學生正在算這一題、卡住了，傳來他目前的手寫過程。任務：\n'
+      + '1) 先看懂他寫到哪、判斷他的方向可不可行。\n'
+      + '2) 方向可行→順著他的寫法給「下一步」的關鍵提示；若看到他哪一步算錯，具體點出（引用他寫的式子）。\n'
+      + '3) 方向不可行或太繞太花時間→直白說原因，建議一個更好走的方向。\n'
+      + '鐵則：只給「剛好夠他自己往下走」的一點提示、循序漸進；**絕對不要**寫出完整解法或最終答案（會毀了練習）。繁體中文、口語、簡短（最多 3 句）。數學式用 \\(…\\) 包起來。';
+    const usr = (b64 ? '這是我目前的手寫。' : '我還沒動筆、不知道怎麼下手。') + '我卡住了，給我一點提示（不要直接給我答案）。' + prior;
+    const content = [];
+    if (b64) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: b64 } });
+    content.push({ type: 'text', text: '題目：' + stripTags(q.q) + '\n正解（你心裡有數就好、絕不可透露）：' + (correctTxt || '（略）') + (q.sol ? '\n參考詳解（絕不可照抄或劇透，只供你判斷方向對不對）：' + stripTags(q.sol) : '') + '\n\n' + usr });
+    const hint = await aiChatCall(system, [{ role: 'user', content }]);
+    qsess.hints.push(hint || '（沒有提示）');
+  } catch (e) {
+    qsess.hints.push('（提示失敗：' + ((e && e.message) || e) + '）');
+  } finally {
+    qsess.hintBusy = false;
+    renderHints();
+  }
+}
+function renderHints() {
+  const el = document.getElementById('qhint');
+  if (!el || !qsess) return;
+  const hints = qsess.hints || [];
+  if (!hints.length && !qsess.hintBusy) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="hint-box"><p class="hint-head">💡 提示（一步一步來，不是完整答案）</p>'
+    + hints.map((h, i) => '<div class="hint-item"><b>' + (i + 1) + '.</b> ' + rtTxt(h) + '</div>').join('')
+    + (qsess.hintBusy ? '<p class="dim">🤖 看你的手寫、想提示中…</p>' : '<div class="actr"><button class="btn sm" onclick="qHint()">再給一點提示</button></div>')
+    + '</div>';
+  el.querySelectorAll('.hint-item').forEach((n) => { try { renderMathInElement(n, { delimiters: [{ left: '\\(', right: '\\)', display: false }, { left: '$', right: '$', display: true }], throwOnError: false }); } catch (e) {} });
 }
 function qSubmit(optIdx) {
   if (!qsess || qsess.locked) return;
@@ -4346,11 +4390,18 @@ function gradTable(grads) {
 }
 let review = null;
 function reviewDue() { if (!syncGate()) return; startReview(dueWrong()); }
-function reviewOne(id) { if (!syncGate()) return; startReview([id]); }
-function startReview(ids) {
+function reviewOne(id) {
+  if (!syncGate()) return;
+  // 「重測這題」不再做完就回列表——這題排第一，其餘未畢業錯題（到期的排前面）接在後面，一路往下跳到下一題錯題
+  const rest = Object.keys(S.wrong)
+    .filter((x) => bankById(x) && !S.wrong[x].grad && x !== id)
+    .sort((a, b) => ((S.wrong[a].due || '') < (S.wrong[b].due || '') ? -1 : 1));
+  startReview([id, ...rest], true);
+}
+function startReview(ids, keepOrder) {
   ids = ids.filter((id) => bankById(id)); // 題庫載不到的失效 id（如雲端題包未載入）直接略過，避免炸畫面
   if (!ids.length) { alert('這些錯題對應的題目不在目前的題庫裡（可能來自尚未載入的雲端題包），暫時無法重測。'); return; }
-  review = { ids: shuffle(ids), i: 0, okN: 0, excl: 0, grads: [] };
+  review = { ids: keepOrder ? ids : shuffle(ids), i: 0, okN: 0, excl: 0, grads: [] };
   sessionActive = true;
   sessionMode = 'review';
   snapSession();

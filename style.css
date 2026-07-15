@@ -518,6 +518,13 @@ sup .vfrac { font-size: 1em; margin: 0 0.05em; }
 .chat-in textarea { flex: 1; resize: none; padding: 9px 11px; border: 1px solid var(--border); border-radius: 11px; font: inherit; line-height: 1.4; background: var(--panel); color: var(--text); max-height: 140px; overflow-y: auto; }
 .chat-in textarea:focus { outline: none; border-color: var(--accent); }
 .chat-in .btn { flex: none; }
+/* 💡 卡關提示：作答中浮在書寫層之上的提示面板 */
+#qhint { position: relative; z-index: 3; }
+#qhint:empty { display: none; }
+.hint-box { background: rgba(var(--insight-rgb), 0.06); border: 1px solid rgba(var(--insight-rgb), 0.35); border-radius: var(--r-m); padding: 9px 12px; margin: 8px 0; }
+.hint-head { font-weight: 700; color: var(--insight); font-size: 13px; margin: 0 0 5px; }
+.hint-item { margin: 4px 0; line-height: 1.5; }
+.hint-item b { color: var(--insight); margin-right: 3px; }
 
 /* 📝 訂正重算：攤開的解答卡 */
 .redo-sol { background: var(--accent-soft); border: 1px solid var(--border); border-left: 4px solid var(--accent); }
