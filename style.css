@@ -523,6 +523,14 @@ sup .vfrac { font-size: 1em; margin: 0 0.05em; }
 .hint-head { font-weight: 700; color: var(--insight); font-size: 13px; margin: 0 0 5px; }
 .hint-item { margin: 4px 0; line-height: 1.5; }
 .hint-item b { color: var(--insight); margin-right: 3px; }
+/* 🔎 錯誤趨勢：錯題手寫縮圖庫 */
+.errshots-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-top: 4px; }
+.errshot { cursor: pointer; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #fff; margin: 0; transition: border-color .12s; }
+.errshot:hover { border-color: var(--accent); }
+.errshot img { display: block; width: 100%; height: 70px; object-fit: cover; object-position: top left; background: #fff; }
+.errshot figcaption { font-size: 11px; padding: 3px 5px; color: var(--text); line-height: 1.3; border-top: 1px solid var(--border); }
+.errshot-full { text-align: center; margin-top: 8px; }
+.errshot-full img { max-width: 100%; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
 
 /* 📝 訂正重算：攤開的解答卡 */
 .redo-sol { background: var(--accent-soft); border: 1px solid var(--border); border-left: 4px solid var(--accent); }
