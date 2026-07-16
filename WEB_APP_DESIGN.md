@@ -1,9 +1,38 @@
 # 數A 特訓系統 — Web App 系統設計（交接文件）
 
 > 2026-07-09 建立。給接手開發 app 的模型：這份講**程式本身的架構、資料模型、功能系統、修改與部署方式**。內容生產線（題庫/類題/蒸餾）看 OPERATIONS.md。戰略與診斷看 README.md。
-> **最新完整交接在桌面 `HANDOFF_數A_0713d.md`**（含全系統健檢 24 findings、零 CDN 架構、保留清單、仍待飼主的步驟）。舊版 `HANDOFF_數A_0712h.md` 保留為歷史。
+> `HANDOFF_數A_0713d.md` 與 `HANDOFF_數A_0712h.md` 是舊環境的歷史交接檔，並未納入本 repository；目前請以 repository 內的 `README.md`、自動測試與本文件為準。
 
-## ⚡ 0713a–0713d 健檢與修復摘要（2026-07-13，最新，先讀這段）
+## 0716c UI／UX 與端到端修復（2026-07-16，最新，先讀這段）
+
+- 視覺系統改為暖白紙張、石墨字、低彩度灰褐／橄欖／磚紅；縮小圓角、陰影與高彩度狀態面積，保留考卷與紙張感。
+- `index.html` 內建自製 SVG symbol sprite，導覽、狀態、標題與按鈕皆使用一致線性圖示；`decorateUi` 會處理動態內容，把舊 emoji 換成 SVG 或乾淨文字，原生 alert／confirm／prompt 也會清理。
+- 頂部品牌與九功能導覽重做；手機 ≤700px 改成固定底部、可橫向滑動的圖示導覽。390×844 實測 `scrollWidth <= innerWidth`，無水平溢出。
+- 今日計數首次使用預設收合；同步狀態改成可存取 button，桌機顯示說明、手機縮成 32px 狀態點，完整訊息保留在 title／aria-label。
+- 批改後不論有沒有實際手寫筆跡，黑／紅／綠筆、復原與加長都會恢復；答案按鈕／輸入欄仍鎖定。真瀏覽器已跑過填充作答與批改。
+- `fbInView` 會把上一題捲到回饋區；下一題現在由 `scrollQuestionTop()` 強制回到頁首。真瀏覽器量測由 `scrollY=586` 回到 `0`。
+- App 版號 `0716d`，`index.html` 以 `app.js?v=0716d` 避免舊 PWA 黏住；Service Worker cache 為 `matha-v29`，仍採 network-first 與自有 prefix 清理。
+- 遠端 `0714c` 的 AI 修補已逐段納入：回饋、卡點與錯題建議統一經 `rtAi` 渲染；`$`／`$$`／混合界定符不再吞散文，速算與提示會先重算驗證再指出錯誤。
+- Node 回歸測試目前 25 項；桌機、390px 手機與九個主畫面均已檢查沒有可見 emoji。
+
+OpenAI 付費 API 已透過 Supabase Edge Function 實際呼叫成功（HTTP 200、`OK`、模型 `gpt-5.6-sol`），一次性測試入口已移除。仍未宣稱通過：Supabase 真帳號跨裝置同步、實體觸控筆手感／掌觸／旋轉。
+
+## 0716a 功能搶救基線（2026-07-16，歷史基線）
+
+已從 `yen-2cats/matha` 重新 clone 成乾淨工作副本，建立 `codex/rescue-20260716` 分支並完成以下修復：
+
+- 交付前重新同步 `origin/main` 的 `0713z`、`0714a`、`0714b`，並在最後一次 fetch 後逐段納入 `0714c`；保留上標字元、數A範圍過濾、AI 數學界定符與回饋渲染修復，並納入回歸測試。
+- 從舊 `matha13/.claude` 隱藏 worktree 找回尚未 commit 的 `fixAiMath` 邊界修復：保留 LaTeX `\\`、正確處理 `\$`，且落單 `$`／`$$` 不再吞掉後續散文；已併入本分支並補測試。
+- IndexedDB 與 localStorage 題包改為逐包合併，不再以整份 revision 二選一而漏掉只存在單側的題包。
+- 題目批改後會重新啟用黑／紅／綠筆、復原與延伸畫布；答案仍維持鎖定。
+- Supabase「登出這台」使用 local scope；另提供經確認後撤銷全部 session 的 global scope，並修正 UI 文案與動態文字 escaping。
+- Service Worker 只清除 `matha-v*` 自有舊 cache，不再刪除同網域其他應用的 CacheStorage。
+- 單選題與手機快答選項具備 button semantics、鍵盤焦點與可讀的 accessible name。
+- 新增零相依 Node 測試、`npm test`、GitHub Actions、`.gitattributes` 與可執行的 README。
+
+仍需在真實環境人工確認：Anthropic API key 實際扣款呼叫、Supabase 真帳號跨裝置同步、實體觸控筆手感。自動測試不應宣稱涵蓋這三項。
+
+## 0713a–0713d 健檢與修復摘要（2026-07-13，歷史）
 
 一輪全系統健檢（後端/前端/UX 12 維度多agent 審查 + 每條對抗式查證 → 24 findings），修掉並上線 **20 條**，版本 `0712h` → **`0713d`**（兩站 matha13 + matha，每項真瀏覽器驗證）。關鍵變動：
 
