@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0716d'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0716e'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -1670,6 +1670,7 @@ function addDays(dateStr, n) {
 
 const ERR_TYPES = ['概念不熟', '計算失誤', '看錯題意', '用猜的', '超時'];
 const EXAM_DATE = '2027-01-22'; // 116 學年度學測（暫定）
+const SCORE_GOAL = { baseline: 9, target: 13, targetAcc: 0.72, mockQuestions: 12, mockPass: 9 };
 
 /* ═══════════ 工具 ═══════════ */
 const $ = (sel) => document.querySelector(sel);
@@ -1830,6 +1831,129 @@ function qTarget(q) { return (q.target || DIFF_TARGET[q.diff]) * 1000; }
 function gradeOf(acc) {
   return GRADE_TABLE.find((g) => acc >= g.min).label;
 }
+function gradeNumber(label) { return parseInt(String(label || ''), 10) || 8; }
+/* 小樣本不能只報一個漂亮百分比。Wilson 區間讓 12 題模擬的「不確定」也看得見。 */
+function wilsonBounds(ok, n, z) {
+  if (!n) return [0, 1];
+  z = z || 1.96;
+  const p = ok / n, z2 = z * z, den = 1 + z2 / n;
+  const mid = (p + z2 / (2 * n)) / den;
+  const half = z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n) / den;
+  return [Math.max(0, mid - half), Math.min(1, mid + half)];
+}
+/* 級分只由完整系統模擬校準。弱項刷題是刻意抽難點，不能拿它直接預測級分。 */
+function mockCalibration() {
+  const external = (S.extMocks || []).filter((m) => m && m.total > 0 && Number.isFinite(Number(m.score)))
+    .slice().sort((a, b) => String(a.d || '').localeCompare(String(b.d || '')) || Number(a.ts || 0) - Number(b.ts || 0)).slice(-3)
+    .map((m) => ({ d: m.d, ok: Number(m.score), n: Number(m.total), acc: Number(m.score) / Number(m.total), name: m.name }));
+  const system = (S.mocks || []).filter((m) => m && m.n > 0 && Number.isFinite(Number(m.acc))).slice(-3);
+  const source = external.length ? 'external' : 'system';
+  const recent = external.length ? external : system;
+  if (!recent.length) return { count: 0, recent: [], source: null, stable: false, passes: 0, staleDays: Infinity };
+  const ok = recent.reduce((s, m) => s + Number(m.ok || Math.round(m.acc * m.n)), 0);
+  const n = recent.reduce((s, m) => s + Number(m.n || 0), 0);
+  const acc = n ? ok / n : 0;
+  const range = source === 'external'
+    ? [Math.min(...recent.map((m) => Number(m.acc))), Math.max(...recent.map((m) => Number(m.acc)))]
+    : wilsonBounds(ok, n);
+  const [low, high] = range;
+  const last = recent[recent.length - 1];
+  const staleDays = Math.max(0, Math.round((new Date(today() + 'T00:00:00Z') - new Date(last.d + 'T00:00:00Z')) / 86400000));
+  const passes = recent.filter((m) => Number(m.acc) >= SCORE_GOAL.targetAcc).length;
+  return { count: recent.length, recent, source, ok, n, acc, low, high, grade: gradeOf(acc), passes, stable: recent.length === 3 && passes === 3, staleDays };
+}
+function practicePulse() {
+  const recent = (S.attempts || []).filter((a) => a.mode !== 'mock').slice(-40);
+  if (!recent.length) return { n: 0, acc: 0, speed: 0 };
+  let target = 0, ms = 0;
+  for (const a of recent) { const q = bankById(a.qid); if (!q) continue; target += qTarget(q); ms += a.ms || 0; }
+  return { n: recent.length, acc: recent.filter((a) => a.ok).length / recent.length, speed: target ? ms / target : 0 };
+}
+function nextBestAction() {
+  const due = dueWrong().filter((id) => bankById(id));
+  if (due.length) return {
+    kind: 'review', title: `先清 ${due.length} 題到期錯題`, why: '這些題正在遺忘點附近，現在重測的回收率最高。', time: `${Math.max(4, Math.min(18, due.length * 3))} 分鐘`, onclick: 'reviewDue()', button: '開始重測',
+  };
+  const cal = mockCalibration();
+  if (!cal.count) return {
+    kind: 'mock', title: '先完成一次 12 題校準', why: '目前只有已知起點 9 級，還沒有可比較的完整模擬；先建立基準，之後才知道四級分缺口縮了多少。', time: '36 分鐘', onclick: "nav('mock')", button: '開始校準',
+  };
+  if (cal.staleDays >= 4) return {
+    kind: 'mock', title: '更新本週校準', why: `距上次完整模擬已 ${cal.staleDays} 天；弱項訓練後要用新卷確認能不能在混合題與時間壓力下取回分數。`, time: '36 分鐘', onclick: "nav('mock')", button: '開始模擬',
+  };
+  const pr = topicPriority();
+  const topic = pr.weak[0] || pr.unseen[0];
+  if (topic) {
+    const t = pr.by[topic];
+    const reason = !t || t.n < 3 ? '目前樣本不足，先補足判斷依據。' : `目前答對率 ${Math.round(100 * t.ok / t.n)}%${t.target && t.ms / t.target > 1.2 ? `、耗時 ${ (t.ms / t.target).toFixed(1) } 倍` : ''}。`;
+    return { kind: 'topic', title: `專攻「${TOPICS[topic]}」6 題`, why: reason, time: '約 15 分鐘', onclick: `startPracTopic('${topic}')`, button: '直接開練' };
+  }
+  return { kind: 'daily', title: '跑一輪今日菜單', why: '目前沒有到期錯題或明顯弱項，維持速度、混合題與複習節奏。', time: '約 25 分鐘', onclick: 'startPomo()', button: '開始練習' };
+}
+function nextActionCard() {
+  const a = nextBestAction();
+  return `<div class="card next-action"><div class="next-action-copy"><span class="eyebrow">現在只做這件事</span><h2>${escH(a.title)}</h2><p>${escH(a.why)}</p><span class="dim fs13">預估 ${escH(a.time)}</span></div>
+    <button class="btn primary big" onclick="${a.onclick}">${escH(a.button)}</button></div>`;
+}
+function scoreGoalCard() {
+  const cal = mockCalibration(), pulse = practicePulse();
+  const current = cal.count ? gradeNumber(cal.grade) : SCORE_GOAL.baseline;
+  const progress = Math.max(0, Math.min(100, (current - SCORE_GOAL.baseline) / (SCORE_GOAL.target - SCORE_GOAL.baseline) * 100));
+  const mockLine = cal.count
+    ? `<b>${escH(cal.grade)}</b><span class="dim">近 ${cal.count} 場${cal.source === 'external' ? '實體模考' : '系統模擬'}合併 ${cal.ok}/${cal.n}（${Math.round(cal.acc * 100)}%）</span>`
+    : `<b>${SCORE_GOAL.baseline} 級分</b><span class="dim">已知起點；尚未完成系統校準</span>`;
+  const uncertainty = cal.count
+    ? (cal.source === 'external'
+      ? `<p class="dim fs12">近 ${cal.count} 場實體模考落在 ${Math.round(cal.low * 100)}%～${Math.round(cal.high * 100)}%；不同卷難度會波動，不把單一場級分當保證。</p>`
+      : `<p class="dim fs12">依目前 ${cal.n} 題樣本，95% 答對率區間約 ${Math.round(cal.low * 100)}%～${Math.round(cal.high * 100)}%；樣本少時不把單一級分當保證。</p>`)
+    : '<p class="dim fs12">完整模擬完成後才顯示系統估計；弱項刷題答對率不拿來灌高級分。</p>';
+  const stability = cal.count ? `${cal.passes}/3 場站上 13 級線${cal.stable ? '，已達穩定門檻' : '，目標是連續 3 場'}` : '目標：每場至少 9/12，連續 3 場';
+  return `<div class="card score-goal">
+    <div class="score-head"><div><span class="eyebrow">9 → 13 級分計畫</span><div class="score-now">${mockLine}</div></div><div class="score-target"><span>目標</span><b>13</b></div></div>
+    <div class="score-track"><i style="width:${progress.toFixed(0)}%"></i></div>
+    <div class="score-bench"><span>13 級校準線：72%</span><span>12 題模擬至少 ${SCORE_GOAL.mockPass} 題</span><span>${stability}</span></div>
+    ${pulse.n ? `<p class="practice-pulse">練習脈搏：近 ${pulse.n} 題 ${Math.round(pulse.acc * 100)}%${pulse.speed ? `，平均耗時為目標 ${pulse.speed.toFixed(1)} 倍` : ''}<span class="dim">（只用來挑下一步，不換算級分）</span></p>` : ''}
+    ${uncertainty}</div>`;
+}
+function recoveryPlanCard() {
+  const recent = (S.attempts || []).slice(-50);
+  const papers = (S.extMocks || []).slice().sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0)).slice(-6);
+  if (!recent.length && !papers.length) return '';
+  const kinds = {}, kindTopics = {};
+  for (const a of recent) {
+    if (a.ok && a.err !== '用猜的' && a.err !== '超時') continue;
+    const label = (a.ai && a.ai.k) || a.err || '尚未分類';
+    kinds[label] = (kinds[label] || 0) + 1;
+    const q = bankById(a.qid); if (!q) continue;
+    kindTopics[label] = kindTopics[label] || {};
+    kindTopics[label][q.topic] = (kindTopics[label][q.topic] || 0) + 1;
+  }
+  const paperTopics = {};
+  for (const p of papers) {
+    if (p.err) kinds[p.err] = (kinds[p.err] || 0) + 1;
+    for (const topic of (p.topics || [])) {
+      if (!TOPICS[topic]) continue;
+      paperTopics[topic] = (paperTopics[topic] || 0) + 1;
+      if (p.err) {
+        kindTopics[p.err] = kindTopics[p.err] || {};
+        kindTopics[p.err][topic] = (kindTopics[p.err][topic] || 0) + 1;
+      }
+    }
+  }
+  const top = Object.entries(kinds).sort((a, b) => b[1] - a[1])[0];
+  let topTopic = null;
+  if (top && kindTopics[top[0]]) topTopic = Object.entries(kindTopics[top[0]]).sort((a, b) => b[1] - a[1])[0][0];
+  const paperWeak = Object.entries(paperTopics).sort((a, b) => b[1] - a[1])[0];
+  const pr = topicPriority(), weak = pr.weak[0] || (paperWeak && paperWeak[0]) || pr.unseen[0], wt = weak && pr.by[weak];
+  const side = (S.sidePractice || []).filter((x) => !x.redo).slice(-30);
+  const sideOk = side.filter((x) => x.ok).length;
+  const due = dueWrong().filter((id) => bankById(id)).length;
+  return `<div class="card recovery-plan"><h2>這週最值得修的三件事</h2><div class="recovery-grid">
+    <div><span class="step-no">1</span><b>${top ? escH(top[0]) : '補齊錯因資料'}</b><p>${top ? `近 ${recent.length} 筆作答${papers.length ? `與 ${papers.length} 場實體模考` : ''}共出現 ${top[1]} 次${topTopic ? `，最多在「${TOPICS[topTopic]}」` : ''}。` : '做錯後點一下錯因，系統才能分辨概念洞與粗心。'}</p>${topTopic ? `<button class="btn sm" onclick="startPracTopic('${topTopic}')">針對練 6 題</button>` : ''}</div>
+    <div><span class="step-no">2</span><b>${weak ? TOPICS[weak] : '維持混合題手感'}</b><p>${weak && wt && wt.n ? `累計 ${wt.n} 題，答對率 ${Math.round(100 * wt.ok / wt.n)}%${wt.target ? `，耗時 ${ (wt.ms / wt.target).toFixed(1) } 倍` : ''}。` : (paperWeak && weak === paperWeak[0] ? `近 ${papers.length} 場紙本／補習班模考中標記 ${paperWeak[1]} 次。` : '目前樣本不足，先補一輪再判斷。')}</p>${weak ? `<button class="btn sm" onclick="startPracTopic('${weak}')">開 6 題</button>` : `<button class="btn sm" onclick="startPomo()">跑今日菜單</button>`}</div>
+    <div><span class="step-no">3</span><b>${due ? `${due} 題到期記憶` : '類題遷移'}</b><p>${due ? '先在遺忘前重測，通過才拉長間隔。' : (side.length ? `近 ${side.length} 題獨立類題答對 ${sideOk} 題（${Math.round(100 * sideOk / side.length)}%）。` : '答錯後立刻做一題類題，確認不是只看懂解答。')}</p>${due ? '<button class="btn sm" onclick="reviewDue()">清到期錯題</button>' : ''}</div>
+  </div></div>`;
+}
 function bankById(id) {
   if (BANK_MAP) return BANK_MAP.get(id);
   return BANK.find((q) => q.id === id);
@@ -1885,11 +2009,12 @@ function advFrom(v) {
 }
 function recordAttempt(q, ok, ms, err, mode, proc, ai, opts) {
   const rec = { qid: q.id, ok, ms, err: err || null, d: today(), mode, ts: Date.now() };
+  if (ok && err === '用猜的') rec.confidence = 'guess'; // 猜中不是已掌握：留下可分析的顯性訊號
   if (proc) rec.p = proc;
   const adv = advFrom(ai);
   if (adv) rec.ai = adv;
   S.attempts.push(rec);
-  if ((!ok || err === '超時') && !(opts && opts.skipWrong)) {
+  if ((!ok || err === '超時' || err === '用猜的') && !(opts && opts.skipWrong)) {
     const w = S.wrong[q.id] || { fails: 0, wins: 0, itv: 0 };
     if (w.grad) { delete w.grad; } // 畢業生回鍋：前科保留、重新入本
     w.fails += ok ? 0 : 1;
@@ -2565,36 +2690,15 @@ function updateBadge() {
    ②我現在在哪、離 13 級多遠（級分梯＋差距翻成題數）③哪個單元弱、點了就練（戰力地圖）。 */
 function renderHome() {
   const days = Math.ceil((new Date(EXAM_DATE) - new Date()) / 86400000);
-  const attempts = S.attempts.length;
-  const mocks = S.mocks.length;
-  let status;
-  if (mocks === 0 && attempts < 10) {
-    status = `<div class="card warn"><b>先做一次模擬摸底</b>，產生第一筆耗時×錯因數據。
-      <div class="actr"><button class="btn primary" onclick="nav('mock')">開始 →</button></div></div>`;
-  } else {
-    const recent = S.attempts.slice(-30);
-    const acc = recent.length ? recent.filter((a) => a.ok).length / recent.length : 0;
-    const prev = S.attempts.slice(-60, -30);
-    const prevAcc = prev.length >= 30 ? prev.filter((a) => a.ok).length / prev.length : null;
-    const goalAcc = acc >= 0.78 ? null : (acc >= 0.72 ? 0.78 : 0.72);
-    const trend = prevAcc == null ? ''
-      : acc > prevAcc ? ` <span class="okc">↑ 比前 30 題 +${Math.round((acc - prevAcc) * 100)}%</span>`
-      : ` <span class="dim">前 30 題 ${(prevAcc * 100).toFixed(0)}%</span>`;
-    status = `<div class="card">
-      <p><b>體感級分：${gradeOf(acc)}</b> <span class="dim">（近 ${recent.length} 題 ${(acc * 100).toFixed(0)}%）</span>${trend}</p>
-      ${gradeLadder(acc)}
-      ${goalAcc
-        ? `<p class="fs13 dim">距 ${goalAcc === 0.78 ? '14 級門檻（78%）' : '13 級門檻（72%）'}差 ${Math.max(1, Math.round((goalAcc - acc) * 100))} 個百分點 ≈ 近 30 題再多對 <b>${Math.max(1, Math.ceil((goalAcc - acc) * 30))}</b> 題</p>`
-        : '<p class="fs13 okc">已站上 14 級線——用錯題本與模擬把它釘穩。</p>'}
-    </div>`;
-  }
-  const fresh = mocks === 0 && attempts < 10; // 零數據新手：摸底卡放最頂、最大聲
   app().innerHTML = `
   <div class="hero">
     <h1>數A特訓 <span class="dim" style="font-size:12px">${APP_VER}</span></h1>
     <p>距離 116 學測還有 <b class="accent">${days} 天</b></p>
   </div>
-  ${fresh ? status + todayCard() : todayCard() + status}
+  ${nextActionCard()}
+  ${scoreGoalCard()}
+  ${todayCard()}
+  ${recoveryPlanCard()}
   ${masteryMap()}
   ${homeInsights()}
   ${teachProfileCard()}
@@ -3933,7 +4037,13 @@ function qResolve(ok) {
   // 🎯 類題支線：只記到獨立桶（S.sidePractice），絕不進 attempts／錯題本／每日點數／本輪成績
   if (qsess.cfg.side) {
     if (!qsess.sideRecord) { // 首次：新增一筆
-      qsess.sideRecord = { qid: q.id, origId: qsess.cfg.origId || null, ok, ms, ts: Date.now(), d: today() };
+      const orig = sideState && sideState.origQ;
+      const origSess = sideState && sideState.sess;
+      qsess.sideRecord = {
+        qid: q.id, origId: qsess.cfg.origId || null, ok, ms, ts: Date.now(), d: today(),
+        topic: q.topic, diff: q.diff, kind: qsess.cfg.redo ? 'guided-redo' : 'independent-transfer',
+        originErr: (origSess && origSess.errPick) || (orig && S.wrong[orig.id] && S.wrong[orig.id].err) || null,
+      };
       if (qsess.cfg.redo) qsess.sideRecord.redo = 1; // 訂正重算：看著解答寫的，別跟自力類題混在一起解讀
       (S.sidePractice = S.sidePractice || []).push(qsess.sideRecord);
     } else { qsess.sideRecord.ok = ok; qsess.sideRecord.ms = ms; } // 改判：更新同一筆（陣列裡是同一個物件參照），不新增
@@ -3982,13 +4092,14 @@ function qResolve(ok) {
     ? `<p class="rejudge">🤖 AI 讀到「<b>${v.read != null ? escH(v.read) : '—'}</b>」→ 判${ok ? '對' : '錯'}　<a onclick="qResolve(${!ok})">判錯了？改判</a></p>`
     : '';
   // ③ 主要動作——緊接判定，一按就走，不用往下拉；類題支線用不同按鈕（不進主流程）
+  const correctErrArg = overtime ? "(qsess.uncertain ? '用猜的' : '超時')" : "(qsess.uncertain ? '用猜的' : null)";
   const action = qsess.cfg.side
     ? (qsess.cfg.redo
       ? `<div class="actr"><button class="btn" onclick="qRedoAgain()">📝 再算一次</button><button class="btn" onclick="sideReturn()">↩ 回到原題</button><button class="btn primary big" onclick="qRedoDone()">下一題 →</button></div>`
       : `<div class="actr"><button class="btn primary big" onclick="sideNext()">🎯 再來一題類題</button><button class="btn" onclick="sideReturn()">↩ 回到原題</button></div>`)
     : (!ok
       ? `<p class="dim" style="margin:8px 0 4px">標個錯因幫錯題本分類（選填，不選也能直接下一題）：</p><div class="chips r">${ERR_TYPES.slice(0, 4).map((e) => `<button class="chip${qsess.errPick === e ? ' sel' : ''}" onclick="qPickErr(this,'${e}')">${e}</button>`).join('')}</div><div class="actr" style="margin-top:8px"><button class="btn" onclick="qRedoStart()">📝 看解答重算一次</button><button class="btn" onclick="qSideStart()">🎯 先練一題類題</button><button class="btn primary big" id="errnext" onclick="qFinish(false, ${ms}, qsess.errPick)">下一題 →</button></div>`
-      : `<div class="actr"><button class="btn primary big" onclick="qFinish(true, ${ms}, ${overtime ? "'超時'" : 'null'})">下一題 →</button><button class="btn" onclick="qSideStart()">🎯 再練一題類題</button></div>`);
+      : `<div class="actr"><button class="btn primary big" onclick="qFinish(true, ${ms}, ${correctErrArg})">下一題 →</button><button class="btn confidence-btn${qsess.uncertain ? ' sel' : ''}" aria-pressed="${qsess.uncertain ? 'true' : 'false'}" onclick="qMarkUncertain(this)">${qsess.uncertain ? '已標記：猜中，明天再驗' : '這題其實是猜中的'}</button><button class="btn" onclick="qSideStart()">🎯 再練一題類題</button></div>`);
   // ④ 中段（批改的靈魂）：先肯定你做得好的 → 錯在哪（圈在你字上）→ 🧠 卡在哪 → 🎯 下次這樣做。詳解不塞這、收摺疊。
   const willProc = aiEnabled() && !v && qsess.proc && qsess.proc.n; // 選擇/打字題稍後由 AI 過程點評接手稱讚＋下次，這裡就不重複
   // 史實類稱讚（曾錯今對/破個人最速）AI 看不到，永遠保留；AI 在場時當下類交給 AI 講
@@ -4043,6 +4154,15 @@ function qPickErr(btn, e) {
   qsess.errPick = e;
   if (btn && btn.parentElement) btn.parentElement.querySelectorAll('.chip').forEach((c) => c.classList.toggle('sel', c === btn));
   const nx = $('#errnext'); if (nx) { nx.disabled = false; nx.textContent = '下一題 →'; }
+}
+function qMarkUncertain(btn) {
+  if (!qsess) return;
+  qsess.uncertain = !qsess.uncertain;
+  if (btn) {
+    btn.classList.toggle('sel', qsess.uncertain);
+    btn.setAttribute('aria-pressed', qsess.uncertain ? 'true' : 'false');
+    btn.textContent = qsess.uncertain ? '已標記：猜中，明天再驗' : '這題其實是猜中的';
+  }
 }
 let qFinLock = false; // 重入鎖：擋掉「連點兩下下一題／錯因鈕」——第一下已把 qsess 換到下一題，第二下（脫離 DOM 的舊按鈕仍會觸發）會誤記下一題並跳過它
 function qFinish(ok, ms, err) {
@@ -4725,7 +4845,7 @@ function reviewNext() {
 function renderStats() {
   if (!S.attempts.length) {
     // 沒做題也要能管理內容包/登錄模考（家教流程常是「先灌題包再開始做」）
-    app().innerHTML = `<h1>📊 數據</h1>${dailyCard()}<div class="card"><p>還沒有做題數據。</p>
+    app().innerHTML = `<h1>📊 數據</h1>${scoreGoalCard()}${nextActionCard()}${dailyCard()}<div class="card"><p>還沒有做題數據。</p>
       <div class="actr"><button class="btn primary" onclick="nav('mock')">去摸底</button></div></div>${timerSettingCard()}${extMockCard()}${packCard()}${aiCard()}${syncCard()}${backupCard()}`;
     return;
   }
@@ -4834,6 +4954,8 @@ function renderStats() {
   }).join('');
   app().innerHTML = `
     <h1>📊 數據</h1>
+    ${scoreGoalCard()}
+    ${recoveryPlanCard()}
     ${dailyCard()}
     ${milestoneCard()}
     ${atk.length ? `<div class="card warn"><b>本週優先攻擊</b> <span class="dim">點單元＝直接開 8 題</span>
@@ -4914,6 +5036,8 @@ function buildTutorDigest() {
   const rec = A.filter((a) => (a.d || '') >= cut), old = A.filter((a) => (a.d || '') < cut);
   const trend = (rec.length && old.length) ? `近14天答對率${(rec.filter((a) => a.ok).length / rec.length * 100).toFixed(0)}%(${rec.length}題) vs 更早${(old.filter((a) => a.ok).length / old.length * 100).toFixed(0)}%(${old.length}題)` : '資料還不夠比趨勢';
   const pct = (x) => (x * 100).toFixed(0) + '%';
+  const paper = (S.extMocks || []).slice().sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0)).slice(-6);
+  const paperLine = paper.length ? paper.map((m) => `${m.d} ${m.name || '模考'}：${m.score}/${m.total}（${pct(m.score / m.total)}）${(m.topics || []).length ? '，失分單元 ' + m.topics.map((k) => TOPICS[k] || k).join('、') : ''}${m.err ? '，主因 ' + m.err : ''}${Number.isFinite(Number(m.minutesLeft)) ? '，剩餘 ' + Number(m.minutesLeft) + ' 分' : ''}`).join('\n') : '（尚未登錄）';
   return [
     `作答總覽：正式作答 ${A.length} 題、答對率 ${pct(okN / A.length)}（${ds[0]}～${ds[ds.length - 1]}）。${trend}。`,
     `\n【各單元（弱→強）】\n` + topics.map((t) => `${t.name}：${t.n}題 答對${pct(t.acc)} 速度${t.spd ? t.spd.toFixed(2) + '×' : '—'}`).join('\n'),
@@ -4921,6 +5045,7 @@ function buildTutorDigest() {
     `【AI 判的錯法機制】` + (Object.entries(kind).sort((a, b) => b[1] - a[1]).map(([k, v]) => k + v).join('、') || '（近期才開始累積、暫少）'),
     `\n【解題行為】平均 ${fiC ? (fiS / fiC).toFixed(1) : '?'} 秒才下第一筆、每題平均停頓 ${pc ? (hesS / pc).toFixed(1) : '?'} 次、擦除 ${pc ? (eraS / pc).toFixed(1) : '?'} 次（停頓多＝在想、擦除多＝算不穩）。`,
     `\n【最近答錯的具體情形】\n` + recent.join('\n'),
+    `\n【紙本／補習班模考】\n` + paperLine,
     `\n【錯題本】待複習 ${dueWrong().length} 題、已畢業 ${gradCount()} 題。`,
   ].join('\n');
 }
@@ -5033,8 +5158,8 @@ function togglePack(src) {
 function extMockCard() {
   const list = (S.extMocks || []).slice().sort((a, b) => (a.d < b.d ? 1 : -1));
   const rows = list.map((m, i) =>
-    `<tr><td>${m.d}</td><td>${m.name || '模考'}</td><td>${m.score}/${m.total}（${Math.round(100 * m.score / m.total)}%）</td>
-      <td>${gradeOf(m.score / m.total)}</td><td>${escH(m.note || '')}</td>
+    `<tr><td>${escH(m.d || '')}</td><td>${escH(m.name || '模考')}</td><td>${Number(m.score)}/${Number(m.total)}（${Math.round(100 * m.score / m.total)}%）</td>
+      <td>${gradeOf(m.score / m.total)}</td><td>${(m.topics || []).map((k) => escH(TOPICS[k] || k)).join('、') || '—'}${m.err ? `<br><span class="dim">${escH(m.err)}</span>` : ''}${Number.isFinite(Number(m.minutesLeft)) ? `<br><span class="dim">剩 ${Number(m.minutesLeft)} 分</span>` : ''}</td><td>${escH(m.note || '')}</td>
       <td><button class="btn sm err" onclick="delExtMock(${i})">刪</button></td></tr>`).join('');
   return `<div class="card"><h2>🏫 補習班模考</h2>
     <div class="chips" style="align-items:flex-end">
@@ -5042,18 +5167,35 @@ function extMockCard() {
       <label class="chip col">得分<input id="em-score" class="ans-input sm" inputmode="decimal" placeholder="76"></label>
       <label class="chip col">滿分<input id="em-total" class="ans-input sm" inputmode="decimal" value="100"></label>
       <label class="chip col">日期<input id="em-date" class="ans-input sm" type="date" value="${today()}"></label>
+      <label class="chip col">剩餘分鐘<input id="em-left" class="ans-input sm" inputmode="numeric" placeholder="0"></label>
     </div>
+    <p class="dim fs13" style="margin:8px 0 4px">失分最多的單元（最多 3 個）</p>
+    <div class="chips em-topics">${Object.keys(TOPICS).map((k) => `<label class="chip"><input type="checkbox" value="${k}" onchange="extMockTopicLimit(this)"> ${TOPICS[k]}</label>`).join('')}</div>
+    <label class="chip col" style="display:inline-flex;margin-top:8px">主要錯因<select id="em-err" class="ans-input sm"><option value="">未分類</option>${ERR_TYPES.map((e) => `<option value="${e}">${e}</option>`).join('')}</select></label>
     <label class="chip col" style="display:block">備註<input id="em-note" class="ans-input" placeholder="錯在哪、考場狀況…（選填）"></label>
     <div class="actr"><button class="btn primary" onclick="addExtMock()">登錄成績</button></div>
-    ${rows ? `<div class="tblwrap"><table class="tbl"><tr><th>日期</th><th>名稱</th><th>得分</th><th>換算</th><th>備註</th><th></th></tr>${rows}</table></div>` : '<p class="dim">還沒登錄。四次補習班模考的成績記這裡，跟系統模擬分開看走勢。</p>'}</div>`;
+    ${rows ? `<div class="tblwrap"><table class="tbl"><tr><th>日期</th><th>名稱</th><th>得分</th><th>換算</th><th>失分線索</th><th>備註</th><th></th></tr>${rows}</table></div>` : '<p class="dim">還沒登錄。紙本或補習班模考只要記分數、最多三個失分單元與主要錯因，就能併入修分建議。</p>'}</div>`;
+}
+function extMockTopicLimit(el) {
+  const checked = [...document.querySelectorAll('.em-topics input:checked')];
+  if (checked.length <= 3) return;
+  el.checked = false;
+  alert('最多選 3 個失分單元，保留真正最影響分數的。');
 }
 function addExtMock() {
   const score = parseFloat(($('#em-score') || {}).value);
   const total = parseFloat(($('#em-total') || {}).value) || 100;
   const d = ($('#em-date') || {}).value || today();
   if (isNaN(score) || score < 0 || score > total) { alert('請填有效的得分（0～滿分）'); return; }
+  const topics = [...document.querySelectorAll('.em-topics input:checked')].map((x) => x.value).filter((k) => TOPICS[k]).slice(0, 3);
+  const minutesRaw = parseFloat(($('#em-left') || {}).value);
   S.extMocks = S.extMocks || [];
-  S.extMocks.push({ d, name: ($('#em-name') || {}).value.trim() || '模考', score, total, note: ($('#em-note') || {}).value.trim(), ts: Date.now() });
+  S.extMocks.push({
+    d, name: ($('#em-name') || {}).value.trim() || '模考', score, total,
+    topics, err: ($('#em-err') || {}).value || null,
+    minutesLeft: Number.isFinite(minutesRaw) ? minutesRaw : null,
+    note: ($('#em-note') || {}).value.trim(), ts: Date.now(),
+  });
   save();
   renderStats();
 }
@@ -5204,15 +5346,13 @@ function syncPill() {
   if (!syncState.user) { show('未登入——紀錄只存本機', 'warn'); return; }
   show(syncState.msg || '已登入', syncState.pushErr ? 'mid' : 'ok');
 }
-let syncGateAsked = false; // 一個 session 只問一次：之後交給右下角常駐的 🔴 未登入角標，別每開一輪就彈一次
+let syncGateAsked = false; // 一個 session 只更新一次提醒；不以原生確認框阻擋離線開練
 function syncGate() {
-  // 回傳 true = 放行。沒登入時攔下來問，避免「做了題但沒上雲」而不自知。
+  // 離線優先：右下角已永久顯示同步狀態，未登入不能再用 confirm 打斷每個訓練入口。
   if (!supa || syncState.user || syncGateAsked) return true;
   syncGateAsked = true;
-  if (confirm('⚠️ 尚未登入雲端同步！\n\n現在開始做題，紀錄只會存在這台裝置的瀏覽器裡——換裝置、清瀏覽器就沒了。\n\n按「確定」先去登入（推薦）\n按「取消」仍然開始（僅本機保存，這次不再提醒）')) {
-    nav('stats');
-    return false;
-  }
+  syncState.msg = '未登入——本次紀錄只存這台；點此可到數據頁登入同步';
+  try { syncPill(); } catch (_) {} // 啟動極早期或測試 DOM 尚未完整時也不阻擋開練
   return true;
 }
 async function syncPush() {

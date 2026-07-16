@@ -2,9 +2,9 @@
 
 ## 結論
 
-本次以 `yen-2cats/matha` 的 `origin/main` 為唯一基線，於 `codex/rescue-20260716` 分支完成修復。交付前再次 fetch，遠端已前進到 `87cec34`（`0714c`）；其 AI 數學字串、回饋渲染與重算防呆變更已逐段比對並納入目前工作樹，同時保留本機較新的 `0716c` 版號、流程與 UI。因尚未獲授權 commit，Git ancestry 仍會顯示分支落後一個 commit；這是未提交狀態，不是程式內容漏整合。
+本次以 `yen-2cats/matha` 的 `origin/main` 為唯一基線，於 `codex/rescue-20260716` 分支完成修復。救援 commit `e6bff87` 經 PR #1 的兩次 GitHub Actions CI 通過後，已於 2026-07-16 合併到 `main`（merge commit `9f2d05f`）。後續 9→13 級分產品改進在獨立的 `codex/score-9-to-13` 分支進行，避免把安全基線與產品實驗混成一批。
 
-目前語法、25 個 Node 回歸案例、Git 物件完整性與瀏覽器主要流程均通過。OpenAI Key 已透過正式 Supabase Edge Function 實際呼叫成功（HTTP 200、回覆 `OK`、模型 `gpt-5.6-sol`）；一次性自我測試入口隨後已移除並確認回到 401。仍未驗證：Supabase 真帳號跨裝置同步、實體平板觸控筆。
+救援基線的語法、25 個 Node 回歸案例、Git 物件完整性與瀏覽器主要流程均通過；0716e 的題庫與學習迴路擴充後，回歸案例增為 34 個。OpenAI Key 已透過正式 Supabase Edge Function 實際呼叫成功（HTTP 200、回覆 `OK`、模型 `gpt-5.6-sol`）；一次性自我測試入口隨後已移除並確認回到 401。仍未驗證：Supabase 真帳號跨裝置同步、實體平板觸控筆。
 
 ## 已修復問題
 
@@ -66,4 +66,4 @@
 1. 在已登入的數A前端跑「測試連線、填充批改、追問、AI 老師」各一次，確認完整 UI 流程與費用。
 2. 用兩個實際裝置登入同一 Supabase 帳號，交叉驗證作答、錯題、題包與 global sign-out；OpenAI Key 不應出現在任何裝置資料中。
 3. 用真正觸控筆驗證 palm rejection、旋轉／resize、續寫、復原與批改紅框位置。
-4. 通過後再 commit、push 並開 PR；目前刻意保留為本機未提交變更，避免未經確認直接改遠端。
+4. 0716e 完成 commit／PR 後，仍需在正式 GitHub Pages 重跑首頁、刷題、模擬、紙本模考登錄與 AI 批改 smoke test。
