@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0717j'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0717k'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -5415,7 +5415,7 @@ function paperInkPersist(force) {
     clearTimeout(paperInkCloudTimer);
     paperInkCloudTimer = setTimeout(() => { if (syncState.user) flushInkQueue(); }, 1400);
     const status = $('#paper-ink-status');
-    if (status) status.textContent = paperInkGestureIsTemporaryErase() ? 'S Pen 側鍵：暫時橡皮擦' : '已保存';
+    if (status) status.textContent = paperInkGestureIsTemporaryErase() ? 'S Pen 側鍵按住：暫時橡皮擦' : '已保存';
     return true;
   };
   if (force) return persist().catch(() => { statePersistErr = true; return false; });
@@ -5423,7 +5423,7 @@ function paperInkPersist(force) {
     statePersistErr = true;
     const status = $('#paper-ink-status'); if (status) status.textContent = '保存失敗，請先不要關閉頁面';
   }), 450);
-  const status = $('#paper-ink-status'); if (status) status.textContent = paperInkGestureIsTemporaryErase() ? 'S Pen 側鍵：暫時橡皮擦' : '保存中';
+  const status = $('#paper-ink-status'); if (status) status.textContent = paperInkGestureIsTemporaryErase() ? 'S Pen 側鍵按住：暫時橡皮擦' : '保存中';
   return Promise.resolve(true);
 }
 function paperInkMarkDirty() {
@@ -5594,7 +5594,7 @@ function paperInkUp(e) {
   if (paperSourceSession.inkPointer !== e.pointerId) return;
   paperInkCommitCurrent();
   paperSourceSession.inkPointer = null; paperSourceSession.inkGestureMode = null;
-  paperInkModeRender(paperSourceSession.inkMode || 'pen');
+  paperInkModeRender(paperSourceSession.sPenButtonHeld ? 'erase' : (paperSourceSession.inkMode || 'pen'), !!paperSourceSession.sPenButtonHeld);
   paperInkPaint();
 }
 function paperInkAttach() {
@@ -5615,32 +5615,25 @@ function paperInkSamsungHoverButton(e) {
   if (!e || e.pointerType !== 'pen' || Number(e.pressure) !== 0) return false;
   return Number(e.button) === 1 || !!(Number(e.buttons) & 4);
 }
-function paperInkSPenToggleMode() {
+function paperInkSamsungHoldSet(held) {
   if (!paperSourceSession) return false;
-  const next = paperSourceSession.inkMode === 'erase' ? 'pen' : 'erase';
-  paperInkModeSet(next);
-  const status = $('#paper-ink-status'); if (status) status.textContent = `S Pen 側鍵：已切換為${next === 'erase' ? '橡皮擦' : '筆'}`;
+  paperSourceSession.sPenButtonHeld = !!held;
+  if (paperSourceSession.inkPointer == null) paperInkModeRender(held ? 'erase' : (paperSourceSession.inkMode || 'pen'), !!held);
   return true;
 }
 function paperInkSamsungHover(e) {
   if (!paperSourceSession || !e || e.pointerType !== 'pen') return false;
-  if (!paperInkSamsungHoverButton(e)) {
-    if (Number(e.pressure) === 0) paperSourceSession.sPenHoverPressed = false;
-    return false;
-  }
-  if (paperSourceSession.sPenHoverPressed) return true;
-  paperSourceSession.sPenHoverPressed = true;
-  paperSourceSession.sPenContextIgnoreUntil = Date.now() + 5000;
-  return paperInkSPenToggleMode();
+  if (paperInkSamsungHoverButton(e)) return paperInkSamsungHoldSet(true);
+  if (Number(e.pressure) === 0) return paperInkSamsungHoldSet(false);
+  return false;
 }
 function paperInkContextMenu(e) {
   e.preventDefault();
   if (!paperSourceSession) return false;
-  const now = Date.now();
-  if (now < Number(paperSourceSession.sPenContextIgnoreUntil || 0)) return false;
-  if (now - Number(paperSourceSession.sPenLastAt || 0) > 3000) return false;
-  paperSourceSession.sPenContextIgnoreUntil = now + 1000;
-  return paperInkSPenToggleMode();
+  paperSourceSession.sPenButtonHeld = false;
+  paperSourceSession.inkPointer = null; paperSourceSession.inkCurrent = null; paperSourceSession.inkGestureMode = null;
+  paperInkModeRender(paperSourceSession.inkMode || 'pen');
+  return false;
 }
 function paperInkPenHasContact(e) {
   if (!e || e.pointerType !== 'pen') return true;
@@ -5648,10 +5641,10 @@ function paperInkPenHasContact(e) {
   return Number.isFinite(pressure) ? pressure > 0 : !!(Number(e.buttons) & 1);
 }
 function paperInkGestureMode(e) {
-  return paperInkPenErasePressed(e) ? 'erase' : (paperSourceSession && paperSourceSession.inkMode === 'erase' ? 'erase' : 'pen');
+  return (paperInkPenErasePressed(e) || paperSourceSession && paperSourceSession.sPenButtonHeld) ? 'erase' : (paperSourceSession && paperSourceSession.inkMode === 'erase' ? 'erase' : 'pen');
 }
 function paperInkGestureIsTemporaryErase() {
-  return !!paperSourceSession && paperSourceSession.inkGestureMode === 'erase' && paperSourceSession.inkMode !== 'erase';
+  return !!paperSourceSession && (paperSourceSession.sPenButtonHeld || paperSourceSession.inkGestureMode === 'erase' && paperSourceSession.inkMode !== 'erase');
 }
 function paperInkCommitCurrent() {
   if (!paperSourceSession) return false;
@@ -5665,12 +5658,12 @@ function paperInkModeRender(mode, temporaryErase = false) {
     const btn = $(`#paper-tool-${key}`); if (btn) btn.classList.toggle('active', key === mode);
   }
   const cv = $('#paper-ink-canvas'); if (cv) cv.dataset.mode = mode;
-  const status = $('#paper-ink-status'); if (status) status.textContent = temporaryErase ? 'S Pen 側鍵：暫時橡皮擦' : '筆跡自動保存';
+  const status = $('#paper-ink-status'); if (status) status.textContent = temporaryErase ? 'S Pen 側鍵按住：暫時橡皮擦' : '筆跡自動保存';
 }
 function paperInkModeSet(mode) {
   if (!paperSourceSession) return;
   paperSourceSession.inkMode = mode === 'erase' ? 'erase' : 'pen';
-  if (paperSourceSession.inkPointer == null) paperInkModeRender(paperSourceSession.inkMode);
+  if (paperSourceSession.inkPointer == null) paperInkModeRender(paperSourceSession.sPenButtonHeld ? 'erase' : paperSourceSession.inkMode, !!paperSourceSession.sPenButtonHeld);
 }
 function paperInkWidthValue(value) {
   const n = Number(value);
@@ -5819,7 +5812,7 @@ function renderPaperSource() {
     <div class="paper-workbar"><div class="paper-workgroup"><button class="paper-icon-btn" onclick="paperWorkspacePage(-1)" ${page <= 0 ? 'disabled' : ''} aria-label="上一頁">${uiIcon('arrow-left')}</button><span class="paper-page-label"><b>${page + 1} / ${source.scans.length}</b><small>${escH(scan.label)}</small></span><button class="paper-icon-btn" onclick="paperWorkspacePage(1)" ${page >= source.scans.length - 1 ? 'disabled' : ''} aria-label="下一頁">${uiIcon('arrow-right')}</button></div>
       <span id="paper-clock" class="timer paper-timer">${fmtClock(left)}</span>
       <div class="paper-workgroup right"><button class="paper-icon-btn" onclick="paperWorkspaceZoom(-.25)" aria-label="縮小題本">−</button><span id="paper-zoom-label" class="paper-zoom-label">${Math.round(paperSourceSession.zoom * 100)}%</span><button class="paper-icon-btn" onclick="paperWorkspaceZoom(.25)" aria-label="放大題本">＋</button><button class="paper-answer-button" onclick="paperAnswerOpen()">${uiIcon('numbers')}<span>答案卡</span><b id="paper-answer-badge">${answered}</b></button><button class="paper-icon-btn" onclick="exitFlow()" aria-label="離開">${uiIcon('x')}</button></div></div>
-    <div class="paper-workspace"><section class="paper-source-pane"><div class="paper-pane-caption"><span>清晰單頁・可直接在題目上寫</span><small id="paper-ink-status">筆跡自動保存</small></div><div class="paper-ink-tools"><button id="paper-tool-pen" onclick="paperInkModeSet('pen')">${uiIcon('pencil')}筆</button><button id="paper-tool-erase" onclick="paperInkModeSet('erase')">${uiIcon('erase')}橡皮擦</button><button onclick="paperInkUndo()">${uiIcon('undo')}復原</button><button onclick="paperInkClear()">${uiIcon('x')}清空本頁筆跡</button><label class="paper-pen-width" for="paper-pen-width"><span>筆粗 <b id="paper-pen-width-label">${Math.round(paperInkWidthValue(paperSourceSession.inkWidth) * 100)}%</b></span><input id="paper-pen-width" type="range" min="35" max="200" step="5" value="${Math.round(paperInkWidthValue(paperSourceSession.inkWidth) * 100)}" oninput="paperInkWidthSet(this.value)" aria-label="調整畫筆粗細"></label></div><div class="paper-page-viewport"><div id="paper-write-sheet" class="paper-write-sheet" data-side="${scan.side}" style="width:${paperSourceSession.zoom * 100}%;max-width:${1180 * paperSourceSession.zoom}px"><div class="paper-question-crop"><img id="paper-source-image" src="${urls[page]}" alt="${escH(source.title)} ${escH(scan.label)}"></div><div class="paper-note-margin" aria-hidden="true"></div><canvas id="paper-ink-canvas" aria-label="可直接書寫的題本頁"></canvas></div><p class="paper-write-hint">觸控筆直接書寫。S Pen 若無法按住擦除：先讓筆尖靠近題本，再按一下側鍵，即可切換「筆／橡皮擦」。單指拖動畫面，雙指可縮放並移動；放大後可用「筆粗」把線條調細。</p></div></section></div>
+    <div class="paper-workspace"><section class="paper-source-pane"><div class="paper-pane-caption"><span>清晰單頁・可直接在題目上寫</span><small id="paper-ink-status">筆跡自動保存</small></div><div class="paper-ink-tools"><button id="paper-tool-pen" onclick="paperInkModeSet('pen')">${uiIcon('pencil')}筆</button><button id="paper-tool-erase" onclick="paperInkModeSet('erase')">${uiIcon('erase')}橡皮擦</button><button onclick="paperInkUndo()">${uiIcon('undo')}復原</button><button onclick="paperInkClear()">${uiIcon('x')}清空本頁筆跡</button><label class="paper-pen-width" for="paper-pen-width"><span>筆粗 <b id="paper-pen-width-label">${Math.round(paperInkWidthValue(paperSourceSession.inkWidth) * 100)}%</b></span><input id="paper-pen-width" type="range" min="35" max="200" step="5" value="${Math.round(paperInkWidthValue(paperSourceSession.inkWidth) * 100)}" oninput="paperInkWidthSet(this.value)" aria-label="調整畫筆粗細"></label></div><div class="paper-page-viewport"><div id="paper-write-sheet" class="paper-write-sheet" data-side="${scan.side}" style="width:${paperSourceSession.zoom * 100}%;max-width:${1180 * paperSourceSession.zoom}px"><div class="paper-question-crop"><img id="paper-source-image" src="${urls[page]}" alt="${escH(source.title)} ${escH(scan.label)}"></div><div class="paper-note-margin" aria-hidden="true"></div><canvas id="paper-ink-canvas" aria-label="可直接書寫的題本頁"></canvas></div><p class="paper-write-hint">觸控筆直接書寫；S Pen 側鍵按住時暫時變成橡皮擦，放開立即回到原本的筆。單指拖動畫面，雙指可縮放並移動；放大後可用「筆粗」把線條調細。</p></div></section></div>
     <div class="paper-finish-bar"><span>${source.questions} 題・${source.minutes} 分鐘｜已填答案 ${answered} 題</span><button class="btn primary" onclick="paperSourceGrade('主動交卷')">交卷，今天只批分</button></div></div>`;
   sessionChrome(true);
   paperInkAttach();
