@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadApp, plain } = require('./helpers/load-app');
 
-test('核心變式題庫把 14 單元補到可大量輪替的 362 題', () => {
+test('核心變式題庫把 14 單元補到可大量輪替的 363 題', () => {
   const { run } = loadApp();
   const summary = plain(run(`(() => {
     const generated = BANK.filter((q) => q.src === '核心變式題庫');
@@ -16,7 +16,7 @@ test('核心變式題庫把 14 單元補到可大量輪替的 362 題', () => {
       byTopic: Object.fromEntries(Object.keys(TOPICS).map((k) => [k, generated.filter((q) => q.topic === k).length])),
     };
   })()`));
-  assert.equal(summary.total, 362);
+  assert.equal(summary.total, 363);
   assert.equal(summary.generated, 280);
   assert.equal(summary.uniqueIds, summary.total);
   assert.equal(summary.uniqueGeneratedStems, summary.generated);

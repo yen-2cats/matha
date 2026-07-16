@@ -1,8 +1,10 @@
 # 數A特訓
 
-給學測數A考生使用的離線優先 PWA。它把題庫、限時訓練、整卡手寫、AI 批改、錯題間隔複習、模擬卷與跨裝置同步放在同一個純前端 app 裡。
+給學測數A考生使用的離線優先 PWA。它把全範圍混合練習、整回全真模考、隔日盲訂正、手寫、AI 批改與跨裝置同步放在同一個純前端 app 裡。
 
-目前版本為 `0716g`，正式站是 <https://uqrqmmw.github.io/matha/>。全站已重做為暖白、石墨字與低彩度灰褐／橄欖色的簡潔介面；導覽與狀態圖示使用專案內建的 SVG，不以 emoji 當正式 UI。離線核心題庫有 362 題；登入後再載入 4092 題經清洗、雜湊驗證且不公開上 GitHub 的私有題庫，共 4454 題可用。首頁以完整模擬校準 9→13 級分，並依到期錯題、校準需求與弱項產生唯一的下一步。
+目前版本為 `0716h`，正式站是 <https://uqrqmmw.github.io/matha/>。全站使用暖白、石墨字與低彩度灰褐／橄欖色；正式 UI 圖示由專案內建 SVG 提供，不使用 emoji。離線核心題庫有 363 題；登入後再載入 4092 題經清洗、雜湊驗證且不公開上 GitHub 的私有題庫，共 4455 題可用。
+
+主要流程只有五個入口：「今日、混合練習、全真模考、隔日訂正、分析」。平日預設全範圍混合，只有數據達到嚴重斷裂門檻才短期開分章補洞；完整模考固定 20 題、100 分鐘，當天只批分，錯題隔天才開放最終答案。詳解需在至少一次獨立重想仍無收穫後才能解鎖，且看完必須重算。完整設計與紙本整回匯入規格見 [`TEACHER_WORKFLOW_V2.md`](TEACHER_WORKFLOW_V2.md)。
 
 ## 快速開始
 
@@ -28,7 +30,7 @@ npm test
 - 內建題庫 schema 與 id 唯一性
 - 私有題庫清洗、缺圖／超範圍隔離、emoji 移除、模板分群與下載雜湊驗證
 - 280 題固定公式核心變式的數量、單元分布、模板欄位與跨單元答案抽查
-- 完整模擬校準、三場穩定門檻、下一步優先序、猜中回收與實體模考訊號
+- 20 題／100 分正式模考結構、多選部分給分、下一步優先序與隔日盲訂正鎖定
 - 分數、多根與座標答案判定
 - 台灣日界與日期加減
 - IndexedDB / localStorage 內容包合併，避免後備切換時丟資料
@@ -51,7 +53,7 @@ GitHub Actions 會在 push 與 pull request 自動執行同一套檢查。
 | `style.css` | 桌機／手機版面、考卷與整卡書寫層 |
 | `bank.js` | 14 單元內建題庫、難度目標與級分表 |
 | `practice-bank.js` | 280 題可重算的核心數字變式；14 單元各 20 題 |
-| `app.js` | 狀態、題目流程、手寫、AI、錯題、模擬、同步與所有畫面 |
+| `app.js` | 狀態、混合練習、全真模考、隔日盲訂正、手寫、AI、同步與所有畫面 |
 | `scripts/build-private-bank.js` | 把本機原始題庫清洗、分包並產生 SHA-256 manifest；輸出目錄不得進 Git |
 | `sw.js` | network-first + 離線 shell 快取 |
 | `vendor/` | 自架 KaTeX 與 Supabase browser client，正式站不依賴 CDN |
@@ -78,7 +80,7 @@ GitHub Actions 會在 push 與 pull request 自動執行同一套檢查。
 1. 修改程式後更新 `app.js` 的 `APP_VER`。
 2. 修改會影響離線 shell 的檔案時，更新 `sw.js` 的 `CACHE` 版本；CacheStorage 是同 origin 共用，清理時只能刪本 app 的 prefix。
 3. 執行 `npm test`。
-4. 用瀏覽器實跑桌機與約 390px 手機寬度：首頁、手機心算、公式卡、主題刷題、模擬、錯題、數據與作戰計畫。
+4. 用瀏覽器實跑桌機與約 390px 手機寬度：今日、混合練習、全真模考、隔日訂正與分析。
 5. 作答流程至少驗證一次「送出 → 批改 → 畫筆恢復但答案仍鎖定 → 下一題回到頁首」。手寫相關變更另需用 PointerEvent／實際畫筆驗證繼續加寫、復原與旋轉 resize。
 6. 有真實憑證與硬體時，再補 AI 端到端、登入同步與平板觸控筆 smoke test；沒有實跑就不能宣稱這三條已驗證。
 
@@ -90,6 +92,6 @@ GitHub Actions 會在 push 與 pull request 自動執行同一套檢查。
 npm run build:private-bank -- --source "C:\path\to\_ALL.qpack.json" --output "C:\path\outside\repo\matha-private-content"
 ```
 
-將輸出的 10 個單元包與 `manifest.json` 上傳到私有 `matha-content` bucket。前端只在登入後下載，逐檔比對 SHA-256；任一檔案不符就拒絕加入題庫，並退回 362 題離線核心庫。
+將輸出的 10 個單元包與 `manifest.json` 上傳到私有 `matha-content` bucket。前端只在登入後下載，逐檔比對 SHA-256；任一檔案不符就拒絕加入題庫，並退回 363 題離線核心庫。
 
-9→13 的閉環、成效指標與下一階段見 `PRODUCT_STRATEGY_9_TO_13.md`；本次搶救的 findings、驗證範圍與未驗證邊界見 `RESCUE_AUDIT_2026-07-16.md`。更完整的系統沿革與設計決策見 `WEB_APP_DESIGN.md`；其中舊行號與舊部署拓撲可能已過時，實作以目前程式與測試為準。
+9→13 的閉環、成效指標與下一階段見 `PRODUCT_STRATEGY_9_TO_13.md`；新版學習流程與紙本整回匯入規格見 `TEACHER_WORKFLOW_V2.md`；本次搶救的 findings、驗證範圍與未驗證邊界見 `RESCUE_AUDIT_2026-07-16.md`。更完整的系統沿革與設計決策見 `WEB_APP_DESIGN.md`；其中舊行號與舊部署拓撲可能已過時，實作以目前程式與測試為準。

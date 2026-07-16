@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0716g'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0716h'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -15,7 +15,7 @@ function stripLegacyAiSecrets(state) {
   return clean;
 }
 function load() {
-  const def = { attempts: [], wrong: {}, drills: {}, mocks: [], daily: {}, ver: 1 };
+  const def = { attempts: [], wrong: {}, drills: {}, mocks: [], corrections: [], daily: {}, ver: 2 };
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
@@ -1743,7 +1743,17 @@ function addDays(dateStr, n) {
 
 const ERR_TYPES = ['概念不熟', '計算失誤', '看錯題意', '用猜的', '超時'];
 const EXAM_DATE = '2027-01-22'; // 116 學年度學測（暫定）
-const SCORE_GOAL = { baseline: 9, target: 13, targetAcc: 0.72, mockQuestions: 12, mockPass: 9 };
+const SCORE_GOAL = { baseline: 9, target: 13, targetAcc: 0.72, mockQuestions: 20, mockPass: 72 };
+const MOCK_SPEC = {
+  minutes: 100,
+  total: 20,
+  sections: [
+    { key: 'single', label: '單選題', count: 6, points: [5, 5, 5, 5, 5, 5] },
+    { key: 'multi', label: '多選題', count: 6, points: [5, 5, 5, 5, 5, 5] },
+    { key: 'fill', label: '選填題', count: 5, points: [5, 5, 5, 5, 5] },
+    { key: 'mixed', label: '混合題／非選擇題', count: 3, points: [3, 4, 8] },
+  ],
+};
 
 /* ═══════════ 工具 ═══════════ */
 const $ = (sel) => document.querySelector(sel);
@@ -1936,32 +1946,49 @@ function mockCalibration() {
   return { count: recent.length, recent, source, ok, n, acc, low, high, grade: gradeOf(acc), passes, stable: recent.length === 3 && passes === 3, staleDays };
 }
 function practicePulse() {
-  const recent = (S.attempts || []).filter((a) => a.mode !== 'mock').slice(-40);
+  const recent = (S.attempts || []).filter((a) => a.mode === 'mixed').slice(-40);
   if (!recent.length) return { n: 0, acc: 0, speed: 0 };
   let target = 0, ms = 0;
   for (const a of recent) { const q = bankById(a.qid); if (!q) continue; target += qTarget(q); ms += a.ms || 0; }
   return { n: recent.length, acc: recent.filter((a) => a.ok).length / recent.length, speed: target ? ms / target : 0 };
 }
+function pendingCorrections() {
+  return (S.corrections || []).filter((batch) => batch && Array.isArray(batch.entries) && batch.entries.some((x) => !x.done));
+}
+function dueCorrections() {
+  return pendingCorrections().filter((batch) => String(batch.due || '') <= today());
+}
+function severeWeakTopics() {
+  const recent = (S.attempts || []).filter((a) => a.mode === 'mixed' || a.mode === 'mock').slice(-60);
+  const by = {};
+  for (const a of recent) {
+    const q = bankById(a.qid); if (!q) continue;
+    const t = (by[q.topic] = by[q.topic] || { n: 0, ok: 0, tail: [] });
+    t.n++; t.ok += a.ok ? 1 : 0; t.tail.push(!!a.ok); t.tail = t.tail.slice(-4);
+  }
+  return Object.keys(by).filter((k) => {
+    const t = by[k];
+    return (t.n >= 6 && t.ok / t.n <= 0.35) || (t.tail.length === 4 && t.tail.every((ok) => !ok));
+  }).map((k) => ({ k, n: by[k].n, ok: by[k].ok, acc: by[k].ok / by[k].n }));
+}
 function nextBestAction() {
-  const due = dueWrong().filter((id) => bankById(id));
-  if (due.length) return {
-    kind: 'review', title: `先清 ${due.length} 題到期錯題`, why: '這些題正在遺忘點附近，現在重測的回收率最高。', time: `${Math.max(4, Math.min(18, due.length * 3))} 分鐘`, onclick: 'reviewDue()', button: '開始重測',
+  const due = dueCorrections();
+  const dueN = due.reduce((sum, batch) => sum + batch.entries.filter((x) => !x.done).length, 0);
+  if (dueN) return {
+    kind: 'correction', title: `先完成 ${dueN} 題隔日盲訂正`, why: '今天只看最終答案，重新找方向；先留下自己的嘗試，仍無收穫才解鎖詳解。', time: `約 ${Math.max(10, dueN * 5)} 分鐘`, onclick: "nav('correct')", button: '開始訂正',
   };
   const cal = mockCalibration();
   if (!cal.count) return {
-    kind: 'mock', title: '先完成一次 12 題校準', why: '目前只有已知起點 9 級，還沒有可比較的完整模擬；先建立基準，之後才知道四級分缺口縮了多少。', time: '36 分鐘', onclick: "nav('mock')", button: '開始校準',
+    kind: 'mock', title: '建立一回全真基準', why: '用正式的 20 題、100 分鐘完成一整回；今天只批分，明天才訂正。', time: '100 分鐘', onclick: "nav('mock')", button: '查看模考說明',
   };
-  if (cal.staleDays >= 4) return {
-    kind: 'mock', title: '更新本週校準', why: `距上次完整模擬已 ${cal.staleDays} 天；弱項訓練後要用新卷確認能不能在混合題與時間壓力下取回分數。`, time: '36 分鐘', onclick: "nav('mock')", button: '開始模擬',
+  if (cal.staleDays >= 7) return {
+    kind: 'mock', title: '更新本週校準', why: `距上次完整模擬已 ${cal.staleDays} 天；用完整一回確認混合情境下能否取回分數。`, time: '100 分鐘', onclick: "nav('mock')", button: '查看模考說明',
   };
-  const pr = topicPriority();
-  const topic = pr.weak[0] || pr.unseen[0];
-  if (topic) {
-    const t = pr.by[topic];
-    const reason = !t || t.n < 3 ? '目前樣本不足，先補足判斷依據。' : `目前答對率 ${Math.round(100 * t.ok / t.n)}%${t.target && t.ms / t.target > 1.2 ? `、耗時 ${ (t.ms / t.target).toFixed(1) } 倍` : ''}。`;
-    return { kind: 'topic', title: `專攻「${TOPICS[topic]}」6 題`, why: reason, time: '約 15 分鐘', onclick: `startPracTopic('${topic}')`, button: '直接開練' };
+  const severe = severeWeakTopics()[0];
+  if (severe) {
+    return { kind: 'topic', title: `「${TOPICS[severe.k]}」需要短期補洞`, why: `混合／模考近 ${severe.n} 題只答對 ${severe.ok} 題，已達到才例外分章介入的門檻。`, time: '約 20 分鐘', onclick: `startTopicIntervention('${severe.k}')`, button: '補洞 6 題' };
   }
-  return { kind: 'daily', title: '跑一輪今日菜單', why: '目前沒有到期錯題或明顯弱項，維持速度、混合題與複習節奏。', time: '約 25 分鐘', onclick: 'startPomo()', button: '開始練習' };
+  return { kind: 'mixed', title: '完成一輪全範圍混合題', why: '不顯示章節，不預告解法；讓你練習從題目本身辨認方向。', time: '約 25 分鐘', onclick: 'startMixedPractice(8)', button: '開始 8 題' };
 }
 function nextActionCard() {
   const a = nextBestAction();
@@ -1980,12 +2007,12 @@ function scoreGoalCard() {
       ? `<p class="dim fs12">近 ${cal.count} 場實體模考落在 ${Math.round(cal.low * 100)}%～${Math.round(cal.high * 100)}%；不同卷難度會波動，不把單一場級分當保證。</p>`
       : `<p class="dim fs12">依目前 ${cal.n} 題樣本，95% 答對率區間約 ${Math.round(cal.low * 100)}%～${Math.round(cal.high * 100)}%；樣本少時不把單一級分當保證。</p>`)
     : '<p class="dim fs12">完整模擬完成後才顯示系統估計；弱項刷題答對率不拿來灌高級分。</p>';
-  const stability = cal.count ? `${cal.passes}/3 場站上 13 級線${cal.stable ? '，已達穩定門檻' : '，目標是連續 3 場'}` : '目標：每場至少 9/12，連續 3 場';
+  const stability = cal.count ? `${cal.passes}/3 場站上練習目標線${cal.stable ? '，已達穩定門檻' : '，目標是連續 3 場'}` : '練習目標：每場至少 72/100，連續 3 場';
   return `<div class="card score-goal">
     <div class="score-head"><div><span class="eyebrow">9 → 13 級分計畫</span><div class="score-now">${mockLine}</div></div><div class="score-target"><span>目標</span><b>13</b></div></div>
     <div class="score-track"><i style="width:${progress.toFixed(0)}%"></i></div>
-    <div class="score-bench"><span>13 級校準線：72%</span><span>12 題模擬至少 ${SCORE_GOAL.mockPass} 題</span><span>${stability}</span></div>
-    ${pulse.n ? `<p class="practice-pulse">練習脈搏：近 ${pulse.n} 題 ${Math.round(pulse.acc * 100)}%${pulse.speed ? `，平均耗時為目標 ${pulse.speed.toFixed(1)} 倍` : ''}<span class="dim">（只用來挑下一步，不換算級分）</span></p>` : ''}
+    <div class="score-bench"><span>目前練習目標：72%</span><span>全真模考至少 ${SCORE_GOAL.mockPass}/100</span><span>${stability}</span></div>
+    ${pulse.n ? `<p class="practice-pulse">混合練習：近 ${pulse.n} 題 ${Math.round(pulse.acc * 100)}%<span class="dim">（只用來找斷點，不換算級分）</span></p>` : ''}
     ${uncertainty}</div>`;
 }
 function recoveryPlanCard() {
@@ -2525,31 +2552,19 @@ function dailyCard() {
   </div>`;
 }
 function todayCard() {
-  const days = dayAgg();
-  const t = today();
-  const tn = days[t] ? Math.round(days[t].pts) : 0;
-  const streak = streakOf(days);
-  const goalDone = tn >= DAY_GOAL;
-  const due = dueWrong().length;
-  const dp = dailyPick();
-  const atk = attackList().slice(0, 3);
-  // streak 保衛戰：今天還沒開張時，顯示的連續天數其實「今晚不練就歸零」——要講明
-  const streakLine = tn === 0 && streak > 0
-    ? `<span>🔥 連續 <b>${streak}</b> 天保衛戰<span class="dim">——今天還沒開張</span></span>`
-    : `<span>🔥 連續 <b>${streak}</b> 天｜今日 <b>${tn}</b> / ${DAY_GOAL} 點${goalDone ? ' <b class="okc">✅</b>' : ''}</span>`;
-  const hint = mockDueHint();
-  return `<div class="card"><div class="today-row">
-      ${streakLine}
-      <span class="shr"><button class="btn" onclick="nav('phone')">📱 零碎時間</button>
-      <button class="btn primary" onclick="startDaily()">▶ 今日菜單</button></span>
-    </div>
-    <div class="goalbar${goalDone ? ' done' : ''}"><div style="width:${Math.min(100, Math.round(100 * tn / DAY_GOAL))}%"></div></div>
+  const dueN = dueCorrections().reduce((sum, batch) => sum + batch.entries.filter((x) => !x.done).length, 0);
+  const waitingN = pendingCorrections().filter((batch) => String(batch.due || '') > today())
+    .reduce((sum, batch) => sum + batch.entries.filter((x) => !x.done).length, 0);
+  const severe = severeWeakTopics();
+  const last = (S.mocks || []).slice(-1)[0];
+  return `<div class="card"><h2>三條清楚的路</h2>
     <div class="menu-prev">
-      <div class="mp-row"><span>⚡ 速訓：<b>${DRILLS[dp.key].name}</b> <span class="dim">（${dp.why}）</span></span><button class="btn sm" onclick="startDrill('${dp.key}')">單練</button></div>
-      <div class="mp-row"><span>📓 到期錯題 <b class="${due ? 'warnc' : 'okc'}">${due}</b> 題${due ? ' <span class="dim">（投報率最高）</span>' : ' ✅'}</span>${due ? '<button class="btn sm" onclick="reviewDue()">單清</button>' : ''}</div>
-      <div class="mp-row"><span>🎯 弱項刷題：${atk.length ? atk.map((a) => `<b>${TOPICS[a.k]}</b><span class="dim">(${a.reason})</span>`).join('、') : '<span class="dim">數據不足→全範圍</span>'}</span><button class="btn sm" onclick="startPracAuto()">單刷</button></div>
+      <div class="mp-row"><span><b>混合練習</b><span class="dim">　全範圍、不顯示章節、不以速度為主</span></span><button class="btn sm" onclick="startMixedPractice(8)">開始 8 題</button></div>
+      <div class="mp-row"><span><b>隔日訂正</b><span class="dim">　今天到期 ${dueN} 題${waitingN ? `；另有 ${waitingN} 題明天才開放` : ''}</span></span><button class="btn sm" ${dueN ? '' : 'disabled'} onclick="nav('correct')">${dueN ? '開始' : '目前無到期'}</button></div>
+      <div class="mp-row"><span><b>全真模考</b><span class="dim">　20 題、100 分鐘${last ? `；上次 ${last.score != null ? last.score : Math.round(last.acc * 100)}/100` : '；尚未建立新版基準'}</span></span><button class="btn sm" onclick="nav('mock')">查看</button></div>
     </div>
-    ${hint ? `<p class="warnc fs13" style="margin:6px 0 0">📅 ${hint}　<button class="btn sm" onclick="nav('mock')">去模擬</button></p>` : ''}</div>`;
+    ${severe.length ? `<div class="warn"><b>偵測到真正的章節斷裂：</b>${severe.map((x) => `${TOPICS[x.k]} ${x.ok}/${x.n}`).join('、')}。這時才例外短期分章補洞。</div>` : '<p class="dim fs13">目前沒有任何章節達到「非常不熟」門檻，因此不開分章練習。</p>'}
+  </div>`;
 }
 /* 級分梯：9~15 一格一級，目前級分實心、13 級掛 🎯 描邊——數字有了形狀才有拉力 */
 function gradeLadder(acc) {
@@ -2621,18 +2636,22 @@ function homeInsights() {
 
 /* ═══════════ 導覽 ═══════════ */
 const VIEWS = {
-  home:  { label: '診斷', icon: 'clipboard', fn: renderHome },
+  home:    { label: '今日', icon: 'clipboard', fn: renderHome },
+  prac:    { label: '混合練習', icon: 'target', fn: renderPracConfig },
+  mock:    { label: '全真模考', icon: 'clock', fn: renderMockIntro },
+  correct: { label: '隔日訂正', icon: 'book', fn: renderCorrections },
+  stats:   { label: '分析', icon: 'chart', fn: renderStats },
+};
+// 舊工具仍保留在「分析」內供需要時使用，但不再擠在主導覽、也不主導每天的訓練順序。
+const LEGACY_VIEWS = {
   phone: { label: '手機練習', icon: 'phone', fn: renderPhone },
-  drill: { label: '速度特訓', icon: 'bolt', fn: renderDrillMenu },
-  prac:  { label: '主題刷題', icon: 'target', fn: renderPracConfig },
-  mock:  { label: '模擬實戰', icon: 'clock', fn: renderMockIntro },
-  wrong: { label: '錯題本', icon: 'book', fn: renderWrong },
+  drill: { label: '速度工具', icon: 'bolt', fn: renderDrillMenu },
+  wrong: { label: '舊錯題庫', icon: 'book', fn: renderWrong },
   tutor: { label: 'AI 老師', icon: 'tutor', fn: renderTutor },
-  stats: { label: '數據', icon: 'chart', fn: renderStats },
-  plan:  { label: '作戰計畫', icon: 'calendar', fn: renderPlan },
+  plan: { label: '舊作戰計畫', icon: 'calendar', fn: renderPlan },
 };
 let sessionActive = false;
-let sessionMode = null; // 'prac' | 'review' | 'mock' | 'drill'
+let sessionMode = null; // 'prac' | 'review' | 'mock' | 'correction' | 'drill'
 let sessSnap = null;    // 進場快照，用於「不保留紀錄」離開時復原
 function snapSession() { sessSnap = { att: S.attempts.length, wrong: JSON.stringify(S.wrong), drills: JSON.stringify(S.drills || {}), daily: JSON.stringify(S.daily || {}) }; }
 function rollbackSession() {
@@ -2663,7 +2682,7 @@ function endSession() {
 /* 中途退出：讓飼主自己選「已作答的要不要留紀錄」，不預設丟掉 */
 function exitFlow(view) {
   // 誤觸離開後回到出發的入口頁，不要一律丟回首頁（想馬上重來一輪不用重新導航）
-  const backTo = { drill: 'drill', phone: 'phone', wflash: 'wrong', prac: 'prac', review: 'wrong' };
+  const backTo = { drill: 'stats', phone: 'stats', wflash: 'correct', prac: 'prac', review: 'correct', correction: 'correct' };
   const goto = view || backTo[sessionMode] || 'home';
   if (!sessionActive) { nav(goto); return; }
   // 開著確認框的時間不算作答時間：按「繼續」時把計時起點往後平移
@@ -2700,9 +2719,18 @@ function exitFlow(view) {
     ]);
     return;
   }
-  if (sessionMode === 'prac' || sessionMode === 'review') {
+  if (sessionMode === 'correction') {
+    modal('<h2>要暫停隔日訂正嗎？</h2><p>已完成與已留下的嘗試都會保留；目前這張尚未送出的手寫不會算一次努力紀錄。</p>', [
+      ['繼續訂正', resume, 'primary'],
+      ['保留進度，離開', () => { endSession(); correction = null; nav(goto); }],
+    ]);
+    return;
+  }
+  if (sessionMode === 'prac' || sessionMode === 'review' || sessionMode === 'correction') {
     const nDone = sessionMode === 'review'
       ? (review ? review.i : 0)
+      : sessionMode === 'correction'
+        ? (correction ? correction.i : 0)
       : S.attempts.length - (sessSnap ? sessSnap.att : S.attempts.length);
     modal(`<h2>要中途離開嗎？</h2><p>這一輪已完成 <b>${Math.max(0, nDone)}</b> 題（已記錄），進行中的這題不會保留。</p>`, [
       ['繼續作答', resume, 'primary'],
@@ -2749,42 +2777,36 @@ function nav(view) {
     b.classList.toggle('active', on);
     if (on) b.scrollIntoView({ inline: 'center', block: 'nearest' }); // 手機 8 分頁橫捲時，切到右側分頁把當前分頁捲進可視範圍，別讓高亮落在畫面外
   });
-  VIEWS[view].fn();
+  const target = VIEWS[view] || LEGACY_VIEWS[view];
+  if (!target) return nav('home');
+  target.fn();
   updateBadge();
 }
 function updateBadge() {
-  const n = dueWrong().length;
-  const b = $('nav button[data-view="wrong"]');
-  b.innerHTML = `${uiIcon('book')}<span>錯題本</span>` + (n ? ` <span class="badge">${n}</span>` : '');
+  const n = dueCorrections().reduce((sum, batch) => sum + batch.entries.filter((x) => !x.done).length, 0);
+  const b = $('nav button[data-view="correct"]');
+  if (b) b.innerHTML = `${uiIcon('book')}<span>隔日訂正</span>` + (n ? ` <span class="badge">${n}</span>` : '');
 }
 
-/* ═══════════ 首頁：作戰儀表板 ═══════════
-   一眼回答三件事：①今天練什麼、練多少、為什麼（todayCard 菜單預覽）
-   ②我現在在哪、離 13 級多遠（級分梯＋差距翻成題數）③哪個單元弱、點了就練（戰力地圖）。 */
+/* ═══════════ 首頁：老師新版流程 ═══════════ */
 function renderHome() {
   const days = Math.ceil((new Date(EXAM_DATE) - new Date()) / 86400000);
   app().innerHTML = `
   <div class="hero">
     <h1>數A特訓 <span class="dim" style="font-size:12px">${APP_VER}</span></h1>
-    <p>距離 116 學測還有 <b class="accent">${days} 天</b></p>
+    <p>距離 116 學測還有 <b class="accent">${days} 天</b>｜預設混合練習，不用章節名稱提示方向</p>
   </div>
   ${nextActionCard()}
-  ${scoreGoalCard()}
   ${todayCard()}
-  ${recoveryPlanCard()}
-  ${masteryMap()}
-  ${homeInsights()}
-  ${teachProfileCard()}
-  <details class="card"><summary class="dim">為什麼這樣練</summary>
-    <ul>
-      <li>「看懂」≠「限時寫出」——練輸出速度與考試工程，不是再上一輪課。</li>
-      <li>先量測：揪出耗時 2~3 倍的題型，不要籠統的「時間不夠」。</li>
-      <li>基本運算練到反射，工作記憶留給難題。</li>
-      <li>跳題紀律＋兩輪作答：會的題 100% 拿到。</li>
-      <li>目標雙線：保底 73%（穩拿 13 級，門檻 72%）、進攻 80%（穩拿 14 級，門檻 78%）——缺口大半是把「會但失分」收回來。</li>
-      <li>歷屆你全寫過、已失真 → 重製成類題在系統裡練；全真模擬＝補習班四次模考。本系統用到考前。</li>
-    </ul>
-  </details>`;
+  ${scoreGoalCard()}
+  <div class="card"><h2>現在的訓練規則</h2>
+    <ol>
+      <li>平日只做全範圍混合題，先從題目辨認方法。</li>
+      <li>只有混合／模考連續顯示某章嚴重斷裂，才短期開 6 題專項補洞。</li>
+      <li>模考完全比照正式試卷：20 題、100 分鐘；當天只批分，不訂正。</li>
+      <li>隔天只看最終答案重想方向；留下努力紀錄後仍無收穫，才解鎖詳解並重算。</li>
+    </ol>
+  </div>`;
 }
 
 /* ═══════════ 速度特訓 ═══════════ */
@@ -3694,43 +3716,23 @@ function dedupeStems(list, cnt) {
   return out;
 }
 function renderPracConfig() {
-  const pr = topicPriority();
-  const rest = Object.keys(TOPICS).filter((k) => !pr.unseen.includes(k) && !pr.weak.includes(k));
-  const order = [...pr.unseen, ...pr.weak, ...rest]; // 沒摸過 → 弱 → 穩：弱的永遠先看到
-  const ac = attCountMap();
-  const chips = order.map((k) => {
-    const qs = BANK.filter((q) => q.topic === k);
-    const seen = qs.filter((q) => ac.get(q.id)).length;
-    const t = pr.by[k];
-    const acc = t && t.n >= 2 ? t.ok / t.n : null;
-    const badge = acc == null ? '<span class="dim">沒練過</span>' : `<b class="${acc < 0.6 ? 'badc' : acc < 0.8 ? 'warnc' : 'okc'}">${Math.round(acc * 100)}%</b>`;
-    return `<label class="chip"><input type="checkbox" value="${k}"> ${TOPICS[k]} ${badge} <span class="dim">${seen}/${qs.length}</span></label>`;
-  }).join('');
+  const severe = severeWeakTopics();
+  const count = [8, 12].includes(S.pracCnt) ? S.pracCnt : 8;
   app().innerHTML = `
-    <h1>🎯 主題刷題</h1>
+    <h1>混合練習</h1>
     <div class="card">
-      <h3>單元</h3>
-      <div class="actr" style="justify-content:flex-end">
-        <button class="btn sm" onclick="pracSel('none')">全不選</button>
-        <button class="btn sm" onclick="pracSel('all')">全選</button>
-        <button class="btn sm" onclick="pracSel('weak')">🎯 選最近弱項</button>
-      </div>
-      <p class="dim fs13" id="presel-note"></p>
-      <div class="chips" id="topicChips">${chips}</div>
-      <h3>難度</h3>
-      <div class="chips" id="diffChips">
-        <label class="chip"><input type="checkbox" value="1" checked> 易</label>
-        <label class="chip"><input type="checkbox" value="2" checked> 中</label>
-        <label class="chip"><input type="checkbox" value="3" checked> 難</label>
-      </div>
-      <h3>題數</h3>
+      <p><b>全範圍隨機混合。</b>作答時不顯示章節與難度，不會先替你暗示該用哪一套方法，也不以單題秒數判斷你是否學會。</p>
+      <p class="dim">系統會優先抽你沒寫過或較少寫的題，並分散題型、單元與近重複題幹。</p>
       <div class="chips" id="cntChips">
-        ${[5, 15].map((n) => `<label class="chip"><input type="radio" name="cnt" value="${n}"${n === ([5, 15].includes(S.pracCnt) ? S.pracCnt : 15) ? ' checked' : ''}> ${n} 題</label>`).join('')}
+        ${[8, 12].map((n) => `<label class="chip"><input type="radio" name="cnt" value="${n}"${n === count ? ' checked' : ''}> ${n} 題</label>`).join('')}
       </div>
-      ${extBankArr().some((q) => q.src && packIsOff(q.src)) ? `<p class="dim fs13">（外部題庫有 ${extBankArr().filter((q) => q.src && packIsOff(q.src)).length} 題被停用中——到 📊 數據頁可重新啟用）</p>` : ''}
-      <div class="actr"><button class="btn primary" onclick="startPrac()">開始（未做過的題優先）</button></div>
+      <div class="actr"><button class="btn primary big" onclick="startPrac()">開始混合練習</button></div>
+    </div>
+    <div class="card"><h2>分章介入門檻</h2>
+      ${severe.length ? `<p>只有下列單元已達「混合／模考近 4 題全錯，或至少 6 題且答對率不超過 35%」：</p>
+        <div class="chips">${severe.map((x) => `<button class="chip" onclick="startTopicIntervention('${x.k}')">${TOPICS[x.k]}　${x.ok}/${x.n}</button>`).join('')}</div>`
+        : '<p class="dim">目前沒有單元嚴重到需要分章。繼續混合寫，先累積真實診斷。</p>'}
     </div>`;
-  pracSel('weak', true); // 弱項優先是預設，不是要多按一下的選項
 }
 /* 單元快速選取：全選／全不選／選最近表現弱的（近14天答對率<80% 或 耗時比>1.2；資料太少退回全期）
    silent＝進場預選模式：沒弱項就全選、不彈 alert */
@@ -3763,26 +3765,40 @@ function pracSel(mode, silent) {
   }
 }
 let prac = null;
-function startPrac() {
+function buildMixedSet(cnt) {
+  const ac = attCountMap();
+  const recent = new Set((S.attempts || []).slice(-30).map((a) => a.qid));
+  const rank = (q) => (ac.get(q.id) || 0) * 100 + (recent.has(q.id) ? 50 : 0) + Math.random() * 20;
+  const pool = BANK.filter((q) => !(q.src && packIsOff(q.src))).slice().sort((a, b) => rank(a) - rank(b));
+  const singleN = Math.max(2, Math.round(cnt * 0.25));
+  const multiN = Math.max(1, Math.round(cnt * 0.15));
+  const plan = [
+    ...pool.filter((q) => q.type === 'single').slice(0, singleN),
+    ...pool.filter((q) => q.type === 'multi').slice(0, multiN),
+    ...pool.filter((q) => q.type === 'fill').slice(0, Math.max(0, cnt - singleN - multiN)),
+  ];
+  return dedupeStems([...shuffle(plan), ...pool], cnt);
+}
+function startMixedPractice(cnt) {
   if (!syncGate()) return;
-  const topics = [...document.querySelectorAll('#topicChips input:checked')].map((i) => i.value);
-  const diffs = [...document.querySelectorAll('#diffChips input:checked')].map((i) => +i.value);
-  const cnt = +document.querySelector('#cntChips input:checked').value;
-  if (cnt !== S.pracCnt) { S.pracCnt = cnt; save(); } // 記住上次選的題數
-  let pool = BANK.filter((q) => topics.includes(q.topic) && diffs.includes(q.diff));
-  if (!pool.length) { alert('沒有符合條件的題目'); return; }
-  // 未做過優先，其次做過次數少的
-  pool = shuffle(pool).sort((a, b) => attemptsOf(a.id).length - attemptsOf(b.id).length);
-  prac = { queue: dedupeStems(pool, cnt), i: 0, results: [], mode: 'practice' };
+  const n = Number(cnt) || 8;
+  S.pracCnt = n; save();
+  prac = { queue: buildMixedSet(n), i: 0, results: [], mode: 'mixed' };
   sessionActive = true;
   sessionMode = 'prac';
   snapSession();
   pracNext();
 }
+function startPrac() {
+  const chosen = document.querySelector('#cntChips input:checked');
+  startMixedPractice(chosen ? +chosen.value : 8);
+}
 function pracNext() {
   if (prac.i >= prac.queue.length) return pracDone();
   renderQuestion(prac.queue[prac.i], {
     head: `第 ${prac.i + 1} / ${prac.queue.length} 題`,
+    hideTopic: prac.mode === 'mixed',
+    noTimer: prac.mode === 'mixed',
     onDone(res) {
       prac.results.push(res);
       prac.i++;
@@ -3797,13 +3813,14 @@ function pracDone() {
   const all = prac.results;
   const r = all.filter((x) => !x.excluded);
   const okN = r.filter((x) => x.ok).length;
-  const slowOk = timerOn() ? r.filter((x) => x.ok && x.ms > x.target * 1.5).length : 0;
+  const showSpeed = prac.mode !== 'mixed' && timerOn();
+  const slowOk = showSpeed ? r.filter((x) => x.ok && x.ms > x.target * 1.5).length : 0;
   const hardWins = all.filter((x, i) => !x.excluded && x.ok && prac.queue[i].diff === 3).length;
   const rows = all.map((x, i) => {
     const q = prac.queue[i];
-    if (x.excluded) return `<tr><td>${TOPICS[q.topic]}</td><td colspan="${timerOn() ? 3 : 2}" class="dim">（中途離開，未列入紀錄）</td></tr>`;
+    if (x.excluded) return `<tr><td>${TOPICS[q.topic]}</td><td colspan="${showSpeed ? 3 : 2}" class="dim">（中途離開，未列入紀錄）</td></tr>`;
     return `<tr><td>${TOPICS[q.topic]}</td><td>${x.ok ? '✔' : '✘'}</td>
-      ${timerOn() ? `<td class="${x.ms > x.target ? 'badc' : 'okc'}">${fmtSec(x.ms)} / ${fmtSec(x.target)}</td>` : ''}
+      ${showSpeed ? `<td class="${x.ms > x.target ? 'badc' : 'okc'}">${fmtSec(x.ms)} / ${fmtSec(x.target)}</td>` : ''}
       <td>${x.err || '—'}</td></tr>`;
   }).join('');
   const cheer = r.length && okN === r.length ? '整輪全對——這種穩定度就是考場要的！'
@@ -3844,7 +3861,7 @@ function pracDone() {
       ${cheer ? `<p class="praise">🎉 ${cheer}</p>` : ''}
       ${progress}
       ${stuckRecap}
-      <table class="tbl"><tr><th>單元</th><th>結果</th>${timerOn() ? '<th>耗時/目標</th>' : ''}<th>錯因</th></tr>${rows}</table>
+      <table class="tbl"><tr><th>單元</th><th>結果</th>${showSpeed ? '<th>耗時/目標</th>' : ''}<th>錯因</th></tr>${rows}</table>
       <div class="actr"><button class="btn" onclick="nav('stats')">看數據</button>
       <button class="btn primary" onclick="nav('prac')">再刷一輪</button></div>
     </div>`;
@@ -3852,7 +3869,10 @@ function pracDone() {
 
 /* ═══════════ 單題渲染（刷題與錯題重測共用） ═══════════ */
 /* ═══ 學測題本樣式：段落標頭＋題號外突＋(1)(2) 直排選項，讀寫都像真考卷 ═══ */
-function sectionLabel(q) { return q.type === 'single' ? '單選題' : q.type === 'multi' ? '多選題' : '選填／非選題'; }
+function sectionLabel(q) {
+  if (q.examSection === 'mixed') return '混合題／非選擇題';
+  return q.type === 'single' ? '單選題' : q.type === 'multi' ? '多選題' : '選填／非選題';
+}
 function bkNum(head) { const m = String(head || '').match(/(\d+)/); return m ? m[1] + '.' : '※'; }
 /* 選項印在題目正下方（像考卷），tap 仍作答；submitFn：single→'qSubmit'|'mockAns'（帶索引），multi→送出鈕 */
 function bkOpts(q, submitFn) {
@@ -3894,6 +3914,8 @@ function scrollQuestionTop() {
 function renderQuestion(q, cfg) {
   qsess = { q, cfg, t0: Date.now(), warned: false, locked: false };
   const target = qTarget(q);
+  const showTimer = timerOn() && !cfg.noTimer;
+  const meta = cfg.hideTopic ? '全範圍混合' : `${TOPICS[q.topic]}${q.src ? `｜<b class="accent">${q.src}</b>` : ''}｜${stars(q.diff)}`;
   const giveUp = `<button class="btn sm skip" onclick="qGiveUp()">🏳 放棄，看答案</button>`;
   const hintBtn = aiEnabled() ? `<button class="btn sm" onclick="qHint()">💡 我卡關了</button>` : ''; // AI 看你手寫、給下一步提示（不給完整答案）
   let actions;
@@ -3908,12 +3930,12 @@ function renderQuestion(q, cfg) {
   }
   app().innerHTML = `
     <div class="session-head">
-      <span>${cfg.head}｜${TOPICS[q.topic]}${q.src ? `｜<b class="accent">${q.src}</b>` : ''}｜${stars(q.diff)}${timerOn() ? `｜目標 ${fmtSec(target)}` : ''}</span>
-      <span class="shr"><span class="dim" style="font-size:11px">${APP_VER}</span>${timerOn() ? '<span id="qtimer" class="timer">00:00</span>' : ''}
+      <span>${cfg.head}｜${meta}${showTimer ? `｜目標 ${fmtSec(target)}` : ''}</span>
+      <span class="shr"><span class="dim" style="font-size:11px">${APP_VER}</span>${showTimer ? '<span id="qtimer" class="timer">00:00</span>' : ''}
       <button class="btn sm xbtn" onclick="exitFlow()" title="離開">✕</button></span>
     </div>
     ${cfg.review && S.wrong[q.id] && !S.wrong[q.id].grad ? `<p class="dim fs13" style="margin:0 0 4px">📓 上次錯因：${S.wrong[q.id].err || '—'}${S.wrong[q.id].err === '超時' ? `｜⚡ 這次要在 ${fmtSec(target)} 內完成才過關` : ''}</p>` : ''}
-    ${timerOn() ? '<div class="timebar"><div id="tbfill" class="timebar-fill"></div></div>' : ''}
+    ${showTimer ? '<div class="timebar"><div id="tbfill" class="timebar-fill"></div></div>' : ''}
     <div id="q-flash" class="ink-flash" style="display:none"></div>
     <div id="qhint"></div><!-- 提示放在書寫卡「外面、上方」：出現時把整張卡連同手寫往下推、不蓋到手寫（卡內任何面板都會蓋到滿版書寫層） -->
     ${cfg.redo ? `<div class="card redo-sol"><p><b>📖 解答攤開著——照它的路，自己再走一遍（寫完照樣批改）：</b></p>${rtTxt(q.sol)}${q.solFig ? `<div class="qfig">${sanitizeSVG(q.solFig)}</div>` : ''}${q.tip ? `<p class="tip">💡 ${rtTxt(q.tip)}</p>` : ''}${teachBlock(q.id)}</div>` : ''}
@@ -3921,7 +3943,7 @@ function renderQuestion(q, cfg) {
   scrollQuestionTop();
   sessionChrome(true);
   inkStart(q.id, qsess.t0);
-  if (!timerOn()) return; // 計時器隱藏：不跑碼表、不出時間警示（時間仍在 qSubmit 幕後量測）
+  if (!showTimer) return; // 混合練習刻意不顯示單題時間；仍在幕後保存耗時供長期分析
   startTicker(() => {
     if (!qsess) return; // 防禦：session 已被清掉的殭屍 tick
     const e = Date.now() - qsess.t0;
@@ -4099,7 +4121,8 @@ function qResolve(ok) {
   const { q } = qsess;
   const ms = qsess.ms;
   const target = qTarget(q);
-  const overtime = timerOn() && ok && ms > target * 1.5;
+  const visibleTiming = timerOn() && !(qsess.cfg && qsess.cfg.noTimer);
+  const overtime = visibleTiming && ok && ms > target * 1.5;
   const correctTxt = q.type === 'fill' ? q.ans[0] : q.ans.map((a) => `(${a + 1})`).join('');
   // 筆跡一律上傳（珍貴分析資料）；改判會重跑 qResolve，用旗標避免重複上傳
   if (!qsess.inkSynced) {
@@ -4124,7 +4147,7 @@ function qResolve(ok) {
   }
   const fb = $('#qfb');
   const v = qsess.ai; // AI 批改結果（只有手寫填充題有）：{read,correct,firstError,praise,nextTime,marks,stuck}
-  const timeStr = timerOn() ? `｜耗時 ${fmtSec(ms)}（目標 ${fmtSec(target)}）` : '';
+  const timeStr = visibleTiming ? `｜耗時 ${fmtSec(ms)}（目標 ${fmtSec(target)}）` : '';
   const solTxt = q.type === 'fill' ? mDispOpt(String(correctTxt)) : correctTxt;
   // 複習模式：晉級/畢業「預告」（與 qFinish 的 reviewResult 同一套規則，先算先講——過關要有過關的感覺）
   const w = qsess.cfg.review ? S.wrong[q.id] : null;
@@ -4349,52 +4372,53 @@ function qRedoDone() {
 function renderMockIntro() {
   const n = S.mocks.length;
   app().innerHTML = `
-    <h1>⏱️ 模擬實戰</h1>
+    <h1>全真模考</h1>
     <div class="card">
-      <p><b>12 題、36 分鐘</b>｜兩輪作答：20 秒內沒路就跳，第二輪回頭；途中不顯示對錯。</p>
-      <p class="dim">已完成 ${n} 次模擬。</p>
-      <div class="actr"><button class="btn primary big" onclick="startMock()">開始模擬（36:00 倒數）</button></div>
+      <p><b>20 題、100 分鐘、滿分 100 分</b>｜6 單選、6 多選、5 選填、3 題混合／非選擇。</p>
+      <p>作答中不顯示對錯或單題建議時間。交卷當天只批分與列出錯題號，不開答案、不訂正；隔天才進入只看最終答案的盲訂正。</p>
+      <p class="dim">目前題庫最後 3 題先以三題非選擇題近似正式結構。你拍完整紙本模考後，會再保留原頁面、題幹與真正題組關係匯入。已完成 ${n} 次模考。</p>
+      <div class="actr"><button class="btn primary big" onclick="startMock()">開始一整回（100:00）</button></div>
     </div>`;
 }
 let mock = null;
 function buildPaper() {
-  // 學測數A結構＝單選＋多選＋選填三段。講義 8 成是填充，純難度抽會抽出一整卷填充——
-  // 這裡先按「題型配額」抽（盡量 3 單選＋2 多選＋7 選填），配額不足才用別型補滿 12 題，
-  // 每型內部仍求難度分散、不同單元、題組不拆。
-  const usedGrp = new Set(), used = new Set(), picked = new Set();
-  const take = (q) => { picked.add(q); used.add(q.topic); if (q.grp) usedGrp.add(q.grp); };
-  const avail = (q) => !picked.has(q) && !(q.grp && usedGrp.has(q.grp));
-  // 從 pool 依「難度配額」挑 n 題：同單元後挑、難度分散（近似整卷 易5中5難2）。
-  const pickN = (pool, n, diffQuota) => {
-    const buckets = { 1: [], 2: [], 3: [] };
-    for (const q of shuffle(pool)) if (avail(q)) buckets[q.diff].push(q);
-    const grab = (d) => {
-      const b = buckets[d]; if (!b || !b.length) return false;
-      let i = b.findIndex((q) => avail(q) && !used.has(q.topic)); // 先挑沒出現過的單元
-      if (i < 0) i = b.findIndex((q) => avail(q));
-      if (i < 0) return false;
-      take(b[i]); return true;
-    };
-    let got = 0;
-    for (const d of [1, 2, 3]) { let q = diffQuota[d] || 0; while (q-- > 0 && got < n && grab(d)) got++; }
-    // 難度配額湊不滿（某難度題不夠）→ 任何難度補滿本型
-    for (const d of [2, 1, 3]) while (got < n && grab(d)) got++;
-    return got;
+  const usedIds = new Set(), usedGroups = new Set(), topicUse = {};
+  const ac = attCountMap();
+  const eligible = (q) => !usedIds.has(q.id) && !(q.grp && usedGroups.has(q.grp)) && !(q.src && packIsOff(q.src));
+  const choose = (type, count, diffPattern) => {
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      const want = diffPattern[i % diffPattern.length];
+      let pool = BANK.filter((q) => q.type === type && q.diff === want && eligible(q));
+      if (!pool.length) pool = BANK.filter((q) => q.type === type && eligible(q));
+      pool.sort((a, b) => ((topicUse[a.topic] || 0) - (topicUse[b.topic] || 0))
+        || ((ac.get(a.id) || 0) - (ac.get(b.id) || 0)) || (Math.random() - 0.5));
+      const q = pool[0]; if (!q) break;
+      usedIds.add(q.id); if (q.grp) usedGroups.add(q.grp); topicUse[q.topic] = (topicUse[q.topic] || 0) + 1;
+      out.push(q);
+    }
+    return out;
   };
-  // 每型分配難度：single3=易1中1難1、multi2=易1中1、fill7=易3中3難1 → 合計 易5中5難2
-  pickN(BANK.filter((q) => q.type === 'single'), 3, { 1: 1, 2: 1, 3: 1 });
-  pickN(BANK.filter((q) => q.type === 'multi'), 2, { 1: 1, 2: 1, 3: 0 });
-  pickN(BANK.filter((q) => q.type === 'fill'), 7, { 1: 3, 2: 3, 3: 1 });
-  if (picked.size < 12) pickN(BANK.slice(), 12 - picked.size, { 1: 4, 2: 4, 3: 4 }); // 某型不夠就用任何型補滿
-  return shuffle([...picked].slice(0, 12));
+  const sections = [
+    { spec: MOCK_SPEC.sections[0], qs: choose('single', 6, [1, 2, 2, 3, 2, 1]) },
+    { spec: MOCK_SPEC.sections[1], qs: choose('multi', 6, [1, 2, 2, 3, 2, 1]) },
+    { spec: MOCK_SPEC.sections[2], qs: choose('fill', 5, [1, 2, 2, 3, 2]) },
+    { spec: MOCK_SPEC.sections[3], qs: choose('fill', 3, [2, 2, 3]) },
+  ];
+  const paper = [];
+  for (const section of sections) for (let i = 0; i < section.qs.length; i++) {
+    paper.push({ ...section.qs[i], examNo: paper.length + 1, examSection: section.spec.key, points: section.spec.points[i] });
+  }
+  return paper;
 }
 function startMock() {
   if (!syncGate()) return;
   const paper = buildPaper();
+  if (paper.length !== MOCK_SPEC.total) { alert(`題庫目前只能組出 ${paper.length} 題，尚不足正式 20 題結構。`); return; }
   mock = {
     paper, orig: paper.slice(), i: 0, round: 1, skipped: [],
     answers: {}, times: {}, proc: {}, exclude: {}, judge: {},
-    tEnd: Date.now() + 36 * 60 * 1000, t0: 0, qwarned: false, sessT0: Date.now(),
+    tEnd: Date.now() + MOCK_SPEC.minutes * 60 * 1000, t0: 0, sessT0: Date.now(),
   };
   sessionActive = true;
   sessionMode = 'mock';
@@ -4405,9 +4429,8 @@ function mockNext() {
   if (mock.i >= mock.paper.length) {
     if (mock.round === 1 && mock.skipped.length) {
       mock.round = 2; mock.paper = mock.skipped.slice(); mock.skipped = []; mock.i = 0;
-      app().innerHTML = `<div class="card good"><h2>第一輪完成 ✔</h2>
-        <p>剩餘 <b>${fmtClock(mock.tEnd - Date.now())}</b>，回頭處理 ${mock.paper.length} 題跳過的題。<br>
-        還是沒路線的題，直接放棄它——保住檢查時間。</p>
+      app().innerHTML = `<div class="card good"><h2>第一輪完成</h2>
+        <p>剩餘 <b>${fmtClock(mock.tEnd - Date.now())}</b>，回頭處理 ${mock.paper.length} 題先放著的題。照你自己的考場策略完成，不提供單題速度提示。</p>
         <div class="actr"><button class="btn primary" onclick="mockQ()">進入第二輪</button></div></div>`;
       return;
     }
@@ -4417,16 +4440,13 @@ function mockNext() {
 }
 function mockQ() {
   const q = mock.paper[mock.i];
-  const cap = qTarget(q);
   mock.t0 = Date.now();
   (mock.qSeen = mock.qSeen || {});
   (mock.qSeen[q.id] = mock.qSeen[q.id] || []).push(mock.t0); // 每輪進場時間：卡點分析只看最後一輪，跨輪空檔不算停頓
-  mock.qwarned = false;
   mock.qlock = false;
   mock.sel = null; // 單選劃卡狀態逐題歸零
   const mockRow = `<div class="mock-actions">
-      ${mock.round === 1 ? `<button class="btn skip" onclick="mockSkip()">跳過 → 第二輪</button>` : `<button class="btn skip" onclick="mockGiveup()">放棄此題</button>`}
-      <span id="mqtimer" class="dim"></span></div>`;
+      ${mock.round === 1 ? `<button class="btn skip" onclick="mockSkip()">先放著，稍後回來</button>` : `<button class="btn skip" onclick="mockGiveup()">暫不作答</button>`}</div>`;
   let actions;
   if (q.type === 'single') {
     actions = `<div class="actr"><button class="btn primary" id="mock-submit" disabled onclick="mockAns(mock.sel)">送出此題</button></div>${mockRow}`; // 點選項＝劃卡，送出才鎖定
@@ -4439,7 +4459,7 @@ function mockQ() {
   }
   app().innerHTML = `
     <div class="session-head">
-      <span>第${mock.round === 1 ? '一' : '二'}輪｜第 ${mock.i + 1} / ${mock.paper.length} 題｜建議 ≤ ${fmtSec(cap)}</span>
+      <span>第${mock.round === 1 ? '一' : '二'}輪｜第 ${q.examNo} 題｜${sectionLabel(q)}｜${q.points} 分</span>
       <span class="shr"><span id="mclock" class="timer">${fmtClock(mock.tEnd - Date.now())}</span>
       <button class="btn sm xbtn" onclick="exitFlow()" title="離開">✕</button></span>
     </div>
@@ -4451,13 +4471,6 @@ function mockQ() {
     const left = mock.tEnd - Date.now();
     if (left <= 0) { mockGrade('時間到！'); return; }
     const c = $('#mclock'); if (c) c.textContent = fmtClock(left);
-    const e = Date.now() - mock.t0;
-    const t = $('#mqtimer');
-    if (t) t.textContent = `本題 ${fmtSec(e)}`;
-    if (!mock.qwarned && e >= cap) {
-      mock.qwarned = true;
-      flashOnce('⏰ 這題理想中該答完了——考場上此刻就該收尾或跳題');
-    }
   });
 }
 function mockInkDone(qid) {
@@ -4555,7 +4568,7 @@ function mockJudgePanel(list) {
       <div class="judge-img">${img ? `<img src="${img}" alt="手寫過程">` : '<span class="dim">（沒有筆跡）</span>'}</div>
       <div class="judge-info">
         <div class="wc-q fs13 dim" style="margin-bottom:4px">${q.stem ? `<div class="bk-stem">${rtTxt(q.stem)}</div>` : ''}${rtTxt(q.q)}</div>
-        <p class="dim">${TOPICS[q.topic]}｜正解：<b class="big">${q.type === 'fill' ? mDispOpt(String(q.ans[0])) : q.ans.map((a) => `(${a + 1})`).join('')}</b></p>
+        <p class="dim">第 ${q.examNo} 題｜批改用最終答案：<b class="big">${q.type === 'fill' ? mDispOpt(String(q.ans[0])) : q.ans.map((a) => `(${a + 1})`).join('')}</b></p>
         <div id="jai-${i}"></div>
         <div class="actr"><button class="btn sm err" id="jbad-${i}" onclick="mockJudgeSet(${i}, false)">✗ 錯</button>
         <button class="btn sm okb" id="jok-${i}" onclick="mockJudgeSet(${i}, true)">✓ 對</button></div>
@@ -4565,8 +4578,8 @@ function mockJudgePanel(list) {
   app().innerHTML = `
     <h1>📝 批改手寫題（${list.length} 題）</h1>
     <div class="card">
-      <p>跟考場一樣：寫完才對答案。逐題對照你的手寫答案與正解（等價形式、順序不同都算對），按 ✓ 或 ✗。
-      ${aiEnabled() ? '' : '<span class="dim">（登入雲端同步後，這一步會由 OpenAI 自動先批並標出過程錯在哪）</span>'}</p>
+      <p>這一步只完成對錯判定，不分析錯法、不訂正。逐題對照手寫答案與最終答案（等價形式、順序不同都算對），按對或錯。
+      ${aiEnabled() ? '' : '<span class="dim">（登入雲端同步後，OpenAI 可協助先判對錯。）</span>'}</p>
       ${items}
       <p id="jmsg" class="dim"></p>
       <div class="actr"><button class="btn primary big" onclick="mockJudgeDone()">完成批改，看結果</button></div>
@@ -4601,100 +4614,220 @@ async function mockAIJudge() {
       const stuck = normStuck(v, shots); // 卡點跟著這題的 proc 走，mockFinal 記錄時自然入庫
       if (stuck.length) { m.proc[q.id] = m.proc[q.id] || {}; m.proc[q.id].stuck = stuck; }
       const box = $('#jai-' + i);
-      if (box) box.innerHTML = aiFeedbackHTML(v) + stuckHTML(stuck);
+      if (box) box.innerHTML = `<p class="dim">AI 初判：<b>${aiCorrect(v) ? '對' : '錯'}</b>。過程分析已封存到隔日訂正，不在今天顯示。</p>`;
       if (m.judge[q.id] === undefined) mockJudgeSet(i, aiCorrect(v));
     } catch (e) {
       const box = $('#jai-' + i);
       if (box) box.innerHTML = `<p class="warnc">⚠ AI 批改失敗：${escH((e && e.message) || e)}——請人工批這題。</p>`;
     }
   }
-  if (mock === m && msgEl && msgEl.isConnected) msgEl.textContent = 'AI 批改完成——每題確認 ✓/✗（可改判），再看結果。';
+  if (mock === m && msgEl && msgEl.isConnected) msgEl.textContent = 'AI 初判完成——請逐題確認對或錯，再完成今天的批改。';
 }
 function mockJudgeDone() {
   const missing = mock.toJudge.filter((q) => mock.judge[q.id] === undefined);
   if (missing.length) { const m = $('#jmsg'); if (m) m.textContent = `還有 ${missing.length} 題沒批——每題要按 ✓ 或 ✗。`; return; }
   mockFinal();
 }
+function mockAnswerResult(q, a) {
+  if (!a) return { ok: false, yourAns: '（未作答）', points: 0 };
+  let ok = false, yourAns = '（未作答）';
+  if (a.type === 'single') { ok = a.v === q.ans[0]; yourAns = `(${a.v + 1})`; }
+  else if (a.type === 'multi') {
+    const chosen = Array.isArray(a.v) ? a.v : [];
+    ok = chosen.length === q.ans.length && q.ans.every((x) => chosen.includes(x));
+    yourAns = chosen.length ? chosen.map((c) => `(${c + 1})`).join('') : '（未選）';
+  } else if (a.type === 'inkfill') { ok = !!mock.judge[q.id]; yourAns = '（手寫）'; }
+  else { ok = checkFill(a.v, q.ans); yourAns = a.v || '（空白）'; }
+  let points = ok ? q.points : 0;
+  if (a.type === 'multi' && !ok) {
+    const chosen = new Set(a.v || []), correct = new Set(q.ans || []);
+    let errors = 0;
+    for (let i = 0; i < (q.opts || []).length; i++) if (chosen.has(i) !== correct.has(i)) errors++;
+    points = Math.max(0, q.points * ((q.opts.length - 2 * errors) / q.opts.length));
+  }
+  return { ok, yourAns, points: Math.round(points * 100) / 100 };
+}
+function queueMockCorrection(detail, mockTs) {
+  const entries = detail.filter((x) => !x.ok).map((x) => ({
+    qid: x.q.id, examNo: x.q.examNo, examSection: x.q.examSection, points: x.q.points,
+    yourAns: x.yourAns, answered: x.answered, done: false, attempts: 0, logs: [],
+    solutionUnlockedAt: null, completedAt: null,
+  }));
+  if (!entries.length) return null;
+  const batch = { id: `mock-${mockTs}`, d: today(), due: addDays(today(), 1), mockTs, mt: mockTs, name: '系統全真模考', entries };
+  S.corrections = S.corrections || [];
+  S.corrections.push(batch);
+  return batch;
+}
 function mockFinal() {
   sessionActive = false;
   sessionMode = null;
   sessionChrome(false);
   const paper = mock.graded;
-  let okN = 0;
   const detail = paper.map((q) => {
     const a = mock.answers[q.id];
     const ms = mock.times[q.id] || 0;
-    const target = qTarget(q);
-    let ok = false, yourAns = '（未作答）';
-    if (a) {
-      if (a.type === 'single') { ok = a.v === q.ans[0]; yourAns = `(${a.v + 1})`; }
-      else if (a.type === 'multi') { ok = a.v.length === q.ans.length && q.ans.every((x) => a.v.includes(x)); yourAns = a.v.length ? a.v.map((c) => `(${c + 1})`).join('') : '（未選）'; }
-      else if (a.type === 'inkfill') { ok = !!mock.judge[q.id]; yourAns = '（手寫）'; }
-      else { ok = checkFill(a.v, q.ans); yourAns = a.v || '（空白）'; }
-    }
-    if (ok) okN++;
-    // 只記使用者「實際作答過」的題：沒作答/沒看到的（時間到剩下一堆）仍列入成績與結果表，但不可灌進 attempts／錯題本（否則沒看過的題被排進明天複習）
-    if (a) recordAttempt(q, ok, ms, ok ? (ms > target * 1.5 ? '超時' : null) : '概念不熟', 'mock', mock.proc[q.id] || null, mock.aiv && mock.aiv[q.id]);
-    return { q, ok, ms, target, yourAns, answered: !!a };
+    const result = mockAnswerResult(q, a);
+    // 模考錯題由隔日訂正佇列接管，不進立即可看的舊錯題庫。
+    if (a) recordAttempt(q, result.ok, ms, result.ok ? null : '概念不熟', 'mock', mock.proc[q.id] || null, mock.aiv && mock.aiv[q.id], { skipWrong: true });
+    return { q, ms, answered: !!a, ...result };
   });
-  const acc = paper.length ? okN / paper.length : 0;
-  const overStuck = detail.filter((d) => !d.ok && d.answered && d.ms > d.target * 1.5);
-  const slowOk = detail.filter((d) => d.ok && d.ms > d.target * 1.5);
-  const unused = mock.tEnd - Date.now();
-  const wrongAdded = detail.filter((d) => d.answered && (!d.ok || d.ms > d.target * 1.5)).length; // 有沒有題真的進了錯題本（頁尾那行別在全對時嚇人）
-  const unansweredIds = detail.filter((d) => !d.answered).map((d) => d.q.id);
-  // 跟上一場比 + 級分跨檔 + 新高（有依據才講；退步只陳列數字不評論）
+  const okN = detail.filter((x) => x.ok).length;
+  const score = Math.round(detail.reduce((sum, x) => sum + x.points, 0) * 100) / 100;
+  const acc = score / 100;
+  const wrongNos = detail.filter((x) => !x.ok).map((x) => x.q.examNo);
+  const unansweredNos = detail.filter((x) => !x.answered).map((x) => x.q.examNo);
   let mockTrend = '';
   if (!mock.partial && S.mocks.length >= 1) {
     const prev = S.mocks[S.mocks.length - 1];
-    const bestBefore = Math.max(...S.mocks.map((m2) => m2.acc));
-    mockTrend = `<p class="dim">上次 ${prev.ok}/${prev.n}（${Math.round(prev.acc * 100)}%）→ 這次 ${okN}/${paper.length}（${Math.round(acc * 100)}%）</p>`;
-    if (acc > prev.acc && gradeOf(acc) !== gradeOf(prev.acc)) mockTrend += `<p class="praise">🎉 體感級分推進：${gradeOf(prev.acc)} → ${gradeOf(acc)}</p>`;
-    if (acc > bestBefore) mockTrend += '<p class="praise">🏆 系統模擬新高！</p>';
+    const prevScore = prev.score != null ? prev.score : Math.round(prev.acc * 100);
+    mockTrend = `<p class="dim">上次 ${prevScore}/100 → 這次 ${score}/100</p>`;
   }
-  if (!mock.partial) S.mocks.push({ d: today(), ok: okN, n: paper.length, acc, ts: Date.now() }); // ts 讓 mergeState 的 JSON.stringify 去重不會把同日同分的兩場模考塌成一筆（靜默丟一場）
+  const mockTs = Date.now();
+  let batch = null;
+  if (!mock.partial) {
+    S.mocks.push({ d: today(), score, total: 100, ok: score, n: 100, questionOk: okN, questionN: paper.length, acc, ts: mockTs });
+    batch = queueMockCorrection(detail, mockTs);
+  }
   save();
-  // 逐題鼓勵：只講有真實依據的（曾錯今對、難題拿下、目標內完成）
-  const cheers = detail.filter((d) => d.ok).map((d) => {
-    const past = S.attempts.filter((x) => x.qid === d.q.id).slice(0, -1);
-    const bits = [];
-    if (past.some((x) => !x.ok)) bits.push('之前錯過、這次拿下');
-    if (d.q.diff === 3) bits.push('★★★難題成功解出');
-    if (d.ms && d.ms <= d.target) bits.push('目標時間內完成');
-    return bits.length ? `<li>${TOPICS[d.q.topic]}：${bits.join('、')} 🎉</li>` : '';
-  }).filter(Boolean).join('');
-  const aiNotes = mock.aiv ? paper.map((q) => {
-    const v = mock.aiv[q.id];
-    if (!v || (!v.firstError && !v.nextTime)) return '';
-    return `<li>${TOPICS[q.topic]}：${v.firstError ? `<b>從這裡開始錯</b>——${rtAi(v.firstError)}` : ''}${v.nextTime ? `${v.firstError ? '<br>' : ''}🎯 下次：${rtAi(v.nextTime)}` : ''}</li>`;
-  }).filter(Boolean).join('') : '';
-  const rows = detail.map((x) => `
-    <tr><td>${TOPICS[x.q.topic]} ${starF(x.q.diff)}</td>
-    <td>${x.ok ? '✔' : x.answered ? '✘' : '⊘'}</td>
-    <td>${escH(x.yourAns)}</td>
-    <td>${x.q.type === 'fill' ? mDispOpt(String(x.q.ans[0])) : x.q.ans.map((a) => `(${a + 1})`).join('')}</td>
-    <td class="${x.ms > x.target ? 'badc' : ''}">${fmtSec(x.ms)}/${fmtSec(x.target)}</td></tr>`).join('');
+  const rows = detail.map((x) => `<tr><td>第 ${x.q.examNo} 題</td><td>${x.ok ? '對' : x.answered ? '錯' : '未作答'}</td><td>${x.points} / ${x.q.points}</td></tr>`).join('');
   app().innerHTML = `
-    <h1>模擬結果 — ${mock.reason}</h1>
-    ${goalCrossBanner()}
+    <h1>今日批改完成</h1>
     ${mock.partial ? '<div class="card warn">中途結束：只結算你作答過的題，不列入模擬成績走勢（每題紀錄與筆跡照樣保存）。</div>' : ''}
     <div class="card">
-      <p class="big">答對 <b>${okN} / ${paper.length}</b>（${(acc * 100).toFixed(0)}%）${mock.partial ? '' : `→ 體感 <b class="accent">${gradeOf(acc)}</b>`}</p>
+      <p class="big">得分 <b>${score} / 100</b>｜完全答對 ${okN} / ${paper.length} 題</p>
       ${mockTrend}
-      ${cheers ? `<div class="praise"><b>先說做得好的：</b><ul>${cheers}</ul></div>` : ''}
-      <ul>
-        <li>卡太久沒跳（答錯且耗時超過建議 1.5 倍——考場上 90 秒沒路就該跳）：<b class="${overStuck.length ? 'badc' : 'okc'}">${overStuck.length} 題</b>${overStuck.length ? ' ← 這是你寫不完的直接原因' : ' ✅'}</li>
-        <li>「對但太慢」：<b class="${slowOk.length ? 'warnc' : 'okc'}">${slowOk.length} 題</b>${slowOk.length ? ' ← 已加入錯題本重練速度' : ''}</li>
-        ${mock.partial ? '' : `<li>剩餘未用時間：${unused > 0 ? fmtClock(unused) : '0（時間用罄）'}</li>`}
-      </ul>
-      ${mock.partial ? '<p class="dim">完成一次完整 12 題模擬，才會得到體感級分估計與模擬走勢。</p>' : ''}
-      ${aiNotes ? `<div class="sol"><b>🤖 AI 抓到的出錯點：</b><ul>${aiNotes}</ul></div>` : ''}
-      <div class="tblwrap"><table class="tbl"><tr><th>題目</th><th>結果</th><th>你的答案</th><th>正解</th><th>耗時/建議</th></tr>${rows}</table></div>
-      ${wrongAdded ? '<p class="dim">錯題與超時題已進錯題本，明天到期。</p>' : ''}
-      ${unansweredIds.length ? `<div class="actr"><span class="dim fs13">⊘ 放棄/未作答的 ${unansweredIds.length} 題（完全沒路的題最需要補概念）</span><button class="btn sm" onclick="addWrongManual('${unansweredIds.map(jsA).join(',')}');this.disabled=true;this.textContent='已加入 ✓'">加入錯題本</button></div>` : ''}
-      <div class="actr"><button class="btn" onclick="nav('stats')">看數據</button>
-      <button class="btn primary" onclick="nav('wrong')">去看錯題詳解</button></div>
+      <p>錯題號：<b>${wrongNos.length ? wrongNos.join('、') : '無'}</b>${unansweredNos.length ? `｜未作答：${unansweredNos.join('、')}` : ''}</p>
+      <div class="tblwrap"><table class="tbl"><tr><th>題號</th><th>判定</th><th>得分</th></tr>${rows}</table></div>
+      ${batch ? `<div class="warn"><b>今天到此為止，不訂正。</b>答案、章節與詳解都不在這頁顯示。這 ${batch.entries.length} 題已鎖到 <b>${batch.due}</b>，明天進「隔日訂正」只看最終答案重新想方向。</div>` : ''}
+      ${mock.partial ? '<p class="dim">中途結束不建立隔日訂正批次；完整 20 題交卷才納入新版模考走勢。</p>' : '<p class="dim">多選題依錯選項數給部分分數；非選擇題目前以人工／AI 對錯判定給該小題全分或零分。</p>'}
+      <div class="actr"><button class="btn" onclick="nav('stats')">看模考走勢</button><button class="btn primary" onclick="nav('home')">回今日</button></div>
     </div>`;
+}
+
+/* ═══════════ 隔日盲訂正 ═══════════
+   第一天只批分；到期後先只給最終答案。至少留下一次自己的重想紀錄，仍無收穫才可解鎖詳解。 */
+let correction = null;
+function correctionQuestion(entry) { return bankById(entry && entry.qid); }
+function finalAnswerHTML(q) {
+  if (!q) return '題目已不在目前題庫';
+  return q.type === 'fill' ? mDispOpt(String(q.ans[0])) : q.ans.map((a) => `(${a + 1})`).join('');
+}
+function renderCorrections() {
+  const pending = pendingCorrections().slice().sort((a, b) => String(a.due).localeCompare(String(b.due)));
+  const due = pending.filter((b) => String(b.due || '') <= today());
+  const waiting = pending.filter((b) => String(b.due || '') > today());
+  const dueCards = due.map((batch) => {
+    const open = batch.entries.filter((x) => !x.done).length;
+    const solvedBlind = batch.entries.filter((x) => x.done && x.outcome === 'answer-only').length;
+    const usedSol = batch.entries.filter((x) => x.done && x.outcome === 'solution').length;
+    return `<div class="card"><h2>${escH(batch.name || '全真模考')}｜${batch.d}</h2>
+      <p>尚待訂正 <b>${open}</b> 題｜只看答案想通 ${solvedBlind} 題｜最後使用詳解 ${usedSol} 題</p>
+      <div class="actr"><button class="btn primary" onclick="startCorrection('${jsA(batch.id)}')">${open ? '繼續盲訂正' : '已完成'}</button></div></div>`;
+  }).join('');
+  const waitingCards = waiting.map((batch) => `<div class="card"><h2>${escH(batch.name || '全真模考')}｜${batch.d}</h2>
+    <p>錯題 ${batch.entries.filter((x) => !x.done).length} 題。<b>答案與詳解鎖到 ${batch.due}</b>，今天不訂正。</p></div>`).join('');
+  app().innerHTML = `<h1>隔日訂正</h1>
+    ${dueCards || '<div class="card"><p>今天沒有到期的盲訂正。</p><div class="actr"><button class="btn primary" onclick="nav(\'prac\')">做混合練習</button></div></div>'}
+    ${waitingCards ? `<h2>尚未到期</h2>${waitingCards}` : ''}
+    <details class="card"><summary class="dim">舊版錯題與其他工具</summary><p>舊資料仍完整保留，但不再主導每天流程。</p><div class="actr"><button class="btn sm" onclick="nav('wrong')">舊錯題庫</button><button class="btn sm" onclick="nav('tutor')">AI 老師</button></div></details>`;
+}
+function startCorrection(batchId) {
+  const batch = (S.corrections || []).find((b) => b.id === batchId);
+  if (!batch || String(batch.due || '') > today()) return;
+  const indexes = batch.entries.map((x, i) => (!x.done && correctionQuestion(x) ? i : -1)).filter((i) => i >= 0);
+  if (!indexes.length) { renderCorrections(); return; }
+  correction = { batch, indexes, i: 0, t0: 0 };
+  sessionActive = true; sessionMode = 'correction';
+  correctionNext();
+}
+function correctionNoop() {}
+function correctionNext() {
+  while (correction && correction.i < correction.indexes.length && correction.batch.entries[correction.indexes[correction.i]].done) correction.i++;
+  if (!correction || correction.i >= correction.indexes.length) return correctionDone();
+  renderCorrectionWork();
+}
+function correctionEffort() {
+  if (!correction) return null;
+  const note = (($('#cor-direction') || {}).value || '').trim();
+  const t0 = correction.t0;
+  const proc = inkStop();
+  if (!(proc && proc.n) && note.length < 6) {
+    alert('先在紙上重新算，或寫下至少一句你實際嘗試的方向；這個努力本身才是訓練。');
+    const entry = correction.batch.entries[correction.indexes[correction.i]];
+    const q = correctionQuestion(entry);
+    correction.t0 = Date.now();
+    inkStart(q.id, correction.t0);
+    return null;
+  }
+  const entry = correction.batch.entries[correction.indexes[correction.i]];
+  syncInk(entry.qid, t0, Object.assign({ mode: 'correction', correctionId: correction.batch.id }, proc || {}));
+  return { note, proc, ms: Date.now() - t0 };
+}
+function renderCorrectionWork() {
+  const entry = correction.batch.entries[correction.indexes[correction.i]];
+  const q = correctionQuestion(entry);
+  if (!q) { entry.done = true; save(); correction.i++; return correctionNext(); }
+  const unlocked = !!entry.solutionUnlockedAt;
+  const prior = (entry.logs || []).map((log, i) => `<li>第 ${i + 1} 次：${log.note ? escH(log.note) : `留下 ${log.strokes || 0} 筆手寫`}</li>`).join('');
+  const actions = `<div class="blind-answer"><span class="eyebrow">本階段唯一可看的資料</span><p>最終答案：<b class="big">${finalAnswerHTML(q)}</b></p></div>
+    ${prior ? `<details><summary class="dim">我前面已試過的方向</summary><ol>${prior}</ol></details>` : ''}
+    <label class="chip col" style="display:flex">我這次重新嘗試的方向（也可以直接寫在紙上）<textarea id="cor-direction" class="ans-input" rows="2" placeholder="例如：先把條件改寫成……，再試著找……"></textarea></label>
+    <div class="actr">
+      ${unlocked
+        ? '<button class="btn primary big" onclick="correctionComplete(true)">看過詳解後，已重新算完</button>'
+        : '<button class="btn primary big" onclick="correctionComplete(false)">我自己重新想通並算完</button><button class="btn" onclick="correctionLogStuck()">這次仍沒有方向，記下嘗試</button>'}
+    </div>
+    ${!unlocked && entry.attempts > 0 ? '<div class="actr"><button class="btn" onclick="correctionUnlock()">努力後仍無收穫，解鎖詳解並重算</button></div>' : ''}`;
+  app().innerHTML = `<div class="session-head"><span>隔日盲訂正｜第 ${entry.examNo} 題｜${correction.i + 1} / ${correction.indexes.length}</span>
+      <button class="btn sm xbtn" onclick="exitFlow()" title="離開">✕</button></div>
+    ${unlocked ? `<div class="card redo-sol"><p><b>已完成至少一次獨立重想，現在才開放詳解。</b></p>${rtTxt(q.sol)}${q.solFig ? `<div class="qfig">${sanitizeSVG(q.solFig)}</div>` : ''}</div>` : ''}
+    ${bkCard(q, `第 ${entry.examNo} 題`, 'correctionNoop', actions)}`;
+  sessionChrome(true); scrollQuestionTop();
+  correction.t0 = Date.now();
+  inkStart(q.id, correction.t0);
+}
+function correctionLogStuck() {
+  const effort = correctionEffort(); if (!effort) return;
+  const entry = correction.batch.entries[correction.indexes[correction.i]];
+  entry.attempts = (entry.attempts || 0) + 1;
+  entry.logs = entry.logs || [];
+  entry.logs.push({ ts: Date.now(), note: effort.note, strokes: effort.proc ? effort.proc.n || 0 : 0, ms: effort.ms });
+  correction.batch.mt = Date.now();
+  save();
+  renderCorrectionWork();
+}
+function correctionUnlock() {
+  const entry = correction.batch.entries[correction.indexes[correction.i]];
+  if (!entry || !entry.attempts) return;
+  if (ink) inkStop();
+  entry.solutionUnlockedAt = Date.now(); correction.batch.mt = Date.now(); save();
+  renderCorrectionWork();
+}
+function correctionComplete(usedSolution) {
+  const effort = correctionEffort(); if (!effort) return;
+  const entry = correction.batch.entries[correction.indexes[correction.i]];
+  if (usedSolution && !entry.solutionUnlockedAt) return;
+  entry.logs = entry.logs || [];
+  entry.logs.push({ ts: Date.now(), note: effort.note, strokes: effort.proc ? effort.proc.n || 0 : 0, ms: effort.ms, resolved: true });
+  entry.done = true; entry.completedAt = Date.now(); entry.outcome = usedSolution ? 'solution' : 'answer-only';
+  correction.batch.mt = Date.now();
+  const q = correctionQuestion(entry);
+  if (q) recordAttempt(q, true, effort.ms, null, 'correction', effort.proc, null, { skipWrong: true });
+  save();
+  correction.i++;
+  correctionNext();
+}
+function correctionDone() {
+  sessionActive = false; sessionMode = null; sessionChrome(false);
+  const batch = correction && correction.batch;
+  correction = null;
+  if (!batch) return renderCorrections();
+  const blind = batch.entries.filter((x) => x.done && x.outcome === 'answer-only').length;
+  const solution = batch.entries.filter((x) => x.done && x.outcome === 'solution').length;
+  app().innerHTML = `<h1>這回訂正完成</h1><div class="card good"><p class="big">只靠最終答案重新想通 <b>${blind}</b> 題｜努力後使用詳解 <b>${solution}</b> 題</p>
+    <p>這兩個數字會留在分析裡；重點不是把詳解看懂，而是逐漸提高「只看答案也能自己找回方向」的比例。</p>
+    <div class="actr"><button class="btn" onclick="nav('stats')">看分析</button><button class="btn primary" onclick="nav('prac')">回混合練習</button></div></div>`;
 }
 /* 手動把題目釘進錯題本（模擬放棄題等「沒作答但該補」的題） */
 function addWrongManual(csv) {
@@ -4726,13 +4859,20 @@ function startPracTopics(topics, cnt) {
   if (!pool.length) { alert('這些單元目前沒有題目。'); return; }
   const ac = attCountMap();
   pool = shuffle(pool).sort((a, b) => (ac.get(a.id) || 0) - (ac.get(b.id) || 0));
-  prac = { queue: dedupeStems(pool, Math.min(cnt || 8, pool.length)), i: 0, results: [], mode: 'practice' };
+  prac = { queue: dedupeStems(pool, Math.min(cnt || 8, pool.length)), i: 0, results: [], mode: 'topic-intervention' };
   sessionActive = true;
   sessionMode = 'prac';
   snapSession();
   pracNext();
 }
 function startPracTopic(k) { startPracTopics([k], 6); }
+function startTopicIntervention(k) {
+  if (!severeWeakTopics().some((x) => x.k === k)) {
+    alert('這個單元目前沒有達到分章介入門檻，先回混合練習取得真實診斷。');
+    return;
+  }
+  startPracTopics([k], 6);
+}
 /* 錯題學習卡：題目全文＋上次跑掉的地方＋AI 的「下次這樣做」＋作答時間線＋詳解/老師教法＋行動鈕 */
 function wrongCard(id) {
   const w = S.wrong[id]; const q = bankById(id);
@@ -4916,6 +5056,39 @@ function reviewNext() {
 
 /* ═══════════ 數據 ═══════════ */
 function renderStats() {
+  const mixed = (S.attempts || []).filter((a) => a.mode === 'mixed');
+  const mixedRecent = mixed.slice(-40);
+  const mixedAcc = mixedRecent.length ? mixedRecent.filter((a) => a.ok).length / mixedRecent.length : null;
+  const mocks = (S.mocks || []).slice(-8).reverse();
+  const mockRows = mocks.map((m) => `<tr><td>${escH(m.d || '')}</td><td>${m.score != null ? m.score : Math.round(Number(m.acc || 0) * 100)} / 100</td><td>${m.questionOk != null ? `${m.questionOk}/${m.questionN}` : '舊版紀錄'}</td></tr>`).join('');
+  const entries = (S.corrections || []).flatMap((b) => b.entries || []);
+  const done = entries.filter((x) => x.done);
+  const blind = done.filter((x) => x.outcome === 'answer-only').length;
+  const solution = done.filter((x) => x.outcome === 'solution').length;
+  const severe = severeWeakTopics();
+  app().innerHTML = `<h1>分析</h1>
+    <div class="card"><h2>混合練習</h2>
+      <p class="big">${mixedAcc == null ? '尚無新版混合題紀錄' : `近 ${mixedRecent.length} 題答對 <b>${Math.round(mixedAcc * 100)}%</b>`}</p>
+      <p class="dim">這裡不把速度當主要成績，也不直接換算級分；用途是確認你能否在沒有章節提示時辨認方向。</p>
+    </div>
+    <div class="card"><h2>全真模考走勢</h2>
+      ${mockRows ? `<div class="tblwrap"><table class="tbl"><tr><th>日期</th><th>得分</th><th>完全答對題數</th></tr>${mockRows}</table></div>` : '<p class="dim">尚未完成 20 題、100 分鐘的新版全真模考。</p>'}
+    </div>
+    <div class="card"><h2>隔日訂正品質</h2>
+      <p class="big">只看答案想通 <b>${blind}</b> 題｜最後使用詳解 <b>${solution}</b> 題</p>
+      <p class="dim">尚待完成 ${entries.filter((x) => !x.done).length} 題。目標是讓「只看最終答案就能自己找回方向」的比例逐步上升。</p>
+    </div>
+    <div class="card"><h2>是否需要分章補洞</h2>
+      ${severe.length ? `<p>只有這些單元超過嚴重斷裂門檻：</p><div class="chips">${severe.map((x) => `<button class="chip" onclick="startTopicIntervention('${x.k}')">${TOPICS[x.k]}　${x.ok}/${x.n}</button>`).join('')}</div>` : '<p class="dim">目前沒有。維持混合練習，不因少量錯題就切回分章模式。</p>'}
+    </div>
+    ${scoreGoalCard()}
+    <details class="card"><summary class="dim">工具、帳號與舊版資料</summary>
+      <p>這些功能仍保留，但不放在主要訓練動線。</p>
+      <div class="actr"><button class="btn sm" onclick="nav('phone')">零碎時間工具</button><button class="btn sm" onclick="nav('drill')">速度工具</button><button class="btn sm" onclick="nav('wrong')">舊錯題庫</button><button class="btn sm" onclick="nav('tutor')">AI 老師</button></div>
+      ${timerSettingCard()}${extMockCard()}${packCard()}${aiCard()}${syncCard()}${backupCard()}
+    </details>`;
+}
+function renderLegacyStats() {
   if (!S.attempts.length) {
     // 沒做題也要能管理內容包/登錄模考（家教流程常是「先灌題包再開始做」）
     app().innerHTML = `<h1>📊 數據</h1>${scoreGoalCard()}${nextActionCard()}${dailyCard()}<div class="card"><p>還沒有做題數據。</p>
@@ -5214,8 +5387,8 @@ function packCard() {
     : curatedState.status === 'loading'
       ? '<p class="dim fs13">正在核對私有題庫與本機快取…</p>'
       : curatedState.status === 'error'
-        ? `<p class="warnc fs13">私有題庫未載入：${escH(curatedState.error)}。內建 362 題仍可正常練習。</p>`
-        : (supa && !syncState.user ? '<p class="dim fs13">登入後會載入受保護的完整題庫；未登入可先使用內建 362 題。</p>' : '');
+        ? `<p class="warnc fs13">私有題庫未載入：${escH(curatedState.error)}。內建 363 題仍可正常練習。</p>`
+        : (supa && !syncState.user ? '<p class="dim fs13">登入後會載入受保護的完整題庫；未登入可先使用內建 363 題。</p>' : '');
   if (!keys.length) return curatedLine ? `<div class="card"><h2>私有題庫</h2>${curatedLine}</div>` : '';
   const rows = keys.map((src) => {
     const p = packs[src];
@@ -5493,6 +5666,44 @@ function mergeState(a, b) {
   const mset = new Set((a.mocks || []).map((m) => JSON.stringify(m)));
   const mocks = [...(a.mocks || [])];
   for (const m of b.mocks || []) if (!mset.has(JSON.stringify(m))) mocks.push(m);
+  const mergeCorrectionBatch = (A, B) => {
+    const newer = Number(A.mt || A.mockTs || 0) >= Number(B.mt || B.mockTs || 0) ? A : B;
+    const older = newer === A ? B : A;
+    const entryMap = new Map();
+    const entryKey = (e) => `${e.qid || ''}|${e.examNo || ''}`;
+    for (const entry of [...(older.entries || []), ...(newer.entries || [])]) {
+      const key = entryKey(entry), old = entryMap.get(key);
+      if (!old) { entryMap.set(key, entry); continue; }
+      const logMap = new Map();
+      for (const log of [...(old.logs || []), ...(entry.logs || [])]) {
+        const logKey = `${log.ts || ''}|${log.note || ''}|${log.strokes || 0}|${log.resolved ? 1 : 0}`;
+        logMap.set(logKey, log);
+      }
+      const oldCompleted = Number(old.completedAt || 0), newCompleted = Number(entry.completedAt || 0);
+      const completed = newCompleted >= oldCompleted ? entry : old;
+      entryMap.set(key, {
+        ...old, ...entry,
+        attempts: Math.max(Number(old.attempts || 0), Number(entry.attempts || 0)),
+        logs: [...logMap.values()].sort((x, y) => Number(x.ts || 0) - Number(y.ts || 0)),
+        solutionUnlockedAt: Math.max(Number(old.solutionUnlockedAt || 0), Number(entry.solutionUnlockedAt || 0)) || null,
+        done: !!(old.done || entry.done),
+        completedAt: Math.max(oldCompleted, newCompleted) || null,
+        outcome: completed.outcome || old.outcome || entry.outcome || null,
+      });
+    }
+    return {
+      ...older, ...newer,
+      mt: Math.max(Number(A.mt || A.mockTs || 0), Number(B.mt || B.mockTs || 0)),
+      entries: [...entryMap.values()].sort((x, y) => Number(x.examNo || 0) - Number(y.examNo || 0)),
+    };
+  };
+  const correctionMap = new Map();
+  for (const batch of [...(b.corrections || []), ...(a.corrections || [])]) {
+    if (!batch || !batch.id) continue;
+    const old = correctionMap.get(batch.id);
+    correctionMap.set(batch.id, old ? mergeCorrectionBatch(old, batch) : batch);
+  }
+  const corrections = [...correctionMap.values()].sort((x, y) => Number(x.mockTs || 0) - Number(y.mockTs || 0));
   const emset = new Set((a.extMocks || []).map((m) => JSON.stringify(m)));
   const extMocks = [...(a.extMocks || [])];
   for (const m of b.extMocks || []) if (!emset.has(JSON.stringify(m))) extMocks.push(m);
@@ -5503,7 +5714,7 @@ function mergeState(a, b) {
   const spset = new Set((a.sidePractice || []).map(spkey));
   const sidePractice = [...(a.sidePractice || [])];
   for (const x of b.sidePractice || []) if (!spset.has(spkey(x))) sidePractice.push(x);
-  const merged = { ...b, ...a, attempts, wrong, drills, mocks, extMocks, daily, extbank, sidePractice };
+  const merged = { ...b, ...a, attempts, wrong, drills, mocks, corrections, extMocks, daily, extbank, sidePractice };
   // 內容包（公式卡/重點整理）：兩裝置聯集、rev 大者勝
   if ((a.extflash || []).length || (b.extflash || []).length) merged.extflash = unionById(a.extflash, b.extflash);
   if ((a.extnotes || []).length || (b.extnotes || []).length) merged.extnotes = unionById(a.extnotes, b.extnotes);

@@ -107,6 +107,27 @@ test('跨裝置合併保留兩邊作答，錯題採較新的修改時間', () =>
   assert.equal(merged.wrong.q1.itv, 7);
 });
 
+test('跨裝置在同一回訂正不同題時，完成狀態與重想紀錄都不遺失', () => {
+  const { context, run } = loadApp();
+  context.__states = {
+    a: { corrections: [{ id:'mock-1', mockTs:1, mt:20, entries:[
+      { qid:'q1', examNo:1, done:true, completedAt:20, outcome:'answer-only', attempts:0, logs:[{ ts:20, note:'方向一', resolved:true }] },
+      { qid:'q2', examNo:2, done:false, attempts:0, logs:[] },
+    ] }] },
+    b: { corrections: [{ id:'mock-1', mockTs:1, mt:30, entries:[
+      { qid:'q1', examNo:1, done:false, attempts:0, logs:[] },
+      { qid:'q2', examNo:2, done:true, completedAt:30, outcome:'solution', attempts:1, logs:[{ ts:30, note:'方向二', resolved:true }] },
+    ] }] },
+  };
+  const merged = plain(run('mergeState(__states.a, __states.b).corrections[0]'));
+  assert.deepEqual(merged.entries.map((entry) => [entry.examNo, entry.done, entry.outcome]), [
+    [1, true, 'answer-only'],
+    [2, true, 'solution'],
+  ]);
+  assert.equal(merged.entries[0].logs[0].note, '方向一');
+  assert.equal(merged.entries[1].logs[0].note, '方向二');
+});
+
 test('OpenAI 遷移會剔除舊版瀏覽器與 app_state AI 金鑰', () => {
   const { context, run } = loadApp();
   context.__states = {
@@ -211,14 +232,19 @@ test('註冊確認信固定回到 GitHub Pages 的 matha 專案路徑', async ()
   assert.equal(context.__signupPayload.options.emailRedirectTo, 'https://uqrqmmw.github.io/matha/');
 });
 
-test('公式卡 id 唯一，模擬卷固定 12 題且不重複', () => {
+test('公式卡 id 唯一，模擬卷符合 20 題、100 分與正式題型順序', () => {
   const { run } = loadApp();
   const flashIds = plain(run('FLASH.map((card) => card.id)'));
   assert.equal(flashIds.length, 65);
   assert.equal(new Set(flashIds).size, flashIds.length);
   for (let i = 0; i < 20; i++) {
-    const ids = plain(run('buildPaper().map((q) => q.id)'));
-    assert.equal(ids.length, 12);
-    assert.equal(new Set(ids).size, 12);
+    const paper = plain(run('buildPaper().map((q) => ({ id:q.id, no:q.examNo, section:q.examSection, points:q.points }))'));
+    assert.equal(paper.length, 20);
+    assert.equal(new Set(paper.map((q) => q.id)).size, 20);
+    assert.deepEqual(paper.map((q) => q.no), Array.from({ length: 20 }, (_, n) => n + 1));
+    assert.deepEqual(paper.map((q) => q.section), [
+      ...Array(6).fill('single'), ...Array(6).fill('multi'), ...Array(5).fill('fill'), ...Array(3).fill('mixed'),
+    ]);
+    assert.equal(paper.reduce((sum, q) => sum + q.points, 0), 100);
   }
 });

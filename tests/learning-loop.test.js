@@ -7,7 +7,7 @@ const { loadApp, plain } = require('./helpers/load-app');
 test('級分校準只採完整模擬，三場皆過 72% 才標穩定', () => {
   const { run } = loadApp();
   const result = plain(run(`(() => {
-    S.attempts = Array.from({length: 40}, (_, i) => ({ qid: BANK[i].id, ok: true, ms: 1000, d: today(), mode: 'practice', ts: i + 1 }));
+    S.attempts = Array.from({length: 40}, (_, i) => ({ qid: BANK[i].id, ok: true, ms: 1000, d: today(), mode: 'mixed', ts: i + 1 }));
     const before = mockCalibration();
     S.mocks = [
       { d: addDays(today(), -2), ok: 9, n: 12, acc: .75 },
@@ -25,20 +25,83 @@ test('級分校準只採完整模擬，三場皆過 72% 才標穩定', () => {
   assert.equal(result.pulse.n, 40);
 });
 
-test('下一步優先順序為到期錯題，再校準，再弱項', () => {
+test('下一步優先順序為隔日盲訂正、全真校準、嚴重斷裂，否則混合題', () => {
   const { run } = loadApp();
   const states = plain(run(`(() => {
-    S.attempts = []; S.mocks = []; S.wrong = {};
+    S.attempts = []; S.mocks = []; S.wrong = {}; S.corrections = [];
     const noData = nextBestAction();
-    S.wrong[BANK[0].id] = { fails: 1, wins: 0, itv: 1, due: today(), err: '概念不熟' };
+    S.corrections = [{ id:'c1', due:today(), entries:[{ qid:BANK[0].id, done:false }] }];
     const due = nextBestAction();
-    delete S.wrong[BANK[0].id];
-    S.mocks = [{ d: today(), ok: 8, n: 12, acc: 8 / 12 }];
-    for (let i = 0; i < 4; i++) S.attempts.push({ qid: BANK.find((q) => q.topic === 'num').id, ok: i === 0, ms: 180000, d: today(), mode: 'practice', ts: i + 1 });
+    S.corrections = [];
+    S.mocks = [{ d: today(), score:68, total:100, ok:68, n:100, acc:.68 }];
+    for (let i = 0; i < 4; i++) S.attempts.push({ qid:BANK.find((q) => q.topic === 'num').id, ok:false, ms:180000, d:today(), mode:'mixed', ts:i + 1 });
     const weak = nextBestAction();
-    return { noData: noData.kind, due: due.kind, weak: weak.kind };
+    S.attempts = [];
+    const normal = nextBestAction();
+    return { noData: noData.kind, due: due.kind, weak: weak.kind, normal: normal.kind };
   })()`));
-  assert.deepEqual(states, { noData: 'mock', due: 'review', weak: 'topic' });
+  assert.deepEqual(states, { noData: 'mock', due: 'correction', weak: 'topic', normal: 'mixed' });
+});
+
+test('全真多選採部分計分，模考錯題排到隔天且當天不開放', () => {
+  const { run } = loadApp();
+  const result = plain(run(`(() => {
+    mock = { judge:{} };
+    const q = { id:'x', type:'multi', opts:['a','b','c','d','e'], ans:[0,2], points:5 };
+    const oneError = mockAnswerResult(q, { type:'multi', v:[0] });
+    const detail = [{ q:{ id:BANK[0].id, examNo:1, examSection:'single', points:5 }, ok:false, yourAns:'(2)', answered:true }];
+    S.corrections = [];
+    const batch = queueMockCorrection(detail, 123);
+    return { points:oneError.points, due:batch.due, today:today(), dueNow:dueCorrections().length };
+  })()`));
+  assert.equal(result.points, 3);
+  assert.notEqual(result.due, result.today);
+  assert.equal(result.dueNow, 0);
+});
+
+test('主要導覽只留下新版五條路，章節與速度工具不再佔主入口', () => {
+  const { run } = loadApp();
+  const views = plain(run('Object.entries(VIEWS).map(([key, value]) => [key, value.label])'));
+  assert.deepEqual(views, [
+    ['home', '今日'],
+    ['prac', '混合練習'],
+    ['mock', '全真模考'],
+    ['correct', '隔日訂正'],
+    ['stats', '分析'],
+  ]);
+  assert.equal(run("Object.values(VIEWS).some((v) => /章節|速度|番茄/.test(v.label))"), false);
+});
+
+test('模考交卷當天只顯示分數與錯題號，不洩漏答案、章節或詳解', () => {
+  const { context, run } = loadApp();
+  context.__app = { innerHTML: '' };
+  context.document.querySelector = (selector) => selector === '#app' ? context.__app : null;
+  run(`sessionChrome = () => {}; save = () => {}; recordAttempt = () => {};
+    S.attempts = []; S.mocks = []; S.corrections = [];
+    const q = { ...BANK.find((x) => x.id === 'line5'), examNo: 13, examSection: 'fill', points: 100 };
+    mock = { graded:[q], answers:{ [q.id]:{ type:'fill', v:'0' } }, times:{}, proc:{}, aiv:{}, partial:false };
+    mockFinal();`);
+  const html = context.__app.innerHTML;
+  assert.match(html, /得分 <b>0 \/ 100/);
+  assert.match(html, /今天到此為止，不訂正/);
+  assert.doesNotMatch(html, /25\/3/);
+  assert.doesNotMatch(html, /直線與圓/);
+  assert.doesNotMatch(html, /詳解：|正確答案/);
+});
+
+test('隔日訂正至少記下一次重想，才允許解鎖詳解', () => {
+  const { run } = loadApp();
+  const result = plain(run(`(() => {
+    save = () => {}; renderCorrectionWork = () => {};
+    const entry = { qid:BANK[0].id, examNo:1, done:false, attempts:0, logs:[] };
+    const batch = { id:'c1', d:addDays(today(), -1), due:today(), mt:1, entries:[entry] };
+    S.corrections = [batch]; correction = { batch, indexes:[0], i:0, t0:Date.now() };
+    correctionUnlock();
+    const locked = entry.solutionUnlockedAt == null;
+    entry.attempts = 1; correctionUnlock();
+    return { locked, unlocked:!!entry.solutionUnlockedAt };
+  })()`));
+  assert.deepEqual(result, { locked: true, unlocked: true });
 });
 
 test('答對但猜中會留下 confidence 並排入隔日重測，不灌成熟練', () => {

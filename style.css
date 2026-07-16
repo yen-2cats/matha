@@ -703,6 +703,10 @@ select:focus, textarea:focus, input:focus { outline: 2px solid rgba(117, 103, 92
 .recovery-grid p { min-height: 42px; margin: 0 0 10px; color: var(--dim); font-size: 12.5px; }
 .step-no { display: inline-grid; place-items: center; width: 20px; height: 20px; border: 1px solid #bdb5aa; border-radius: 50%; color: var(--dim); font-size: 11px; }
 .confidence-btn.sel { border-color: #9a8978; background: #e5dfd6; color: #473f38; }
+.blind-answer { margin: 0 0 14px; padding: 16px 18px; border: 1px solid #cfc8bd; border-radius: var(--r-s); background: #f1eee8; }
+.blind-answer p { margin: 0; }
+.blind-answer .big { color: var(--accent-deep); font-size: clamp(22px, 3vw, 30px); font-weight: 650; }
+#cor-direction { width: 100%; min-height: 78px; margin-top: 8px; resize: vertical; }
 
 @media (max-width: 900px) {
   .nav-shell { padding: 0 14px; gap: 14px; }
