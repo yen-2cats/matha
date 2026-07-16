@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0717f'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0717g'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -5353,6 +5353,9 @@ async function startPaperSource(sourceId) {
 let paperInkSaveTimer = null;
 let paperInkCloudTimer = null;
 let paperStateSaveTimer = null;
+let paperZoomPaintTimer = null;
+const PAPER_ZOOM_MIN = .75;
+const PAPER_ZOOM_MAX = 4;
 function paperInkQid(run, page) { return `paper:${run.id}:v${PAPER_LAYOUT_VERSION}:${page}`; }
 async function paperInkLoadAll(run, source) {
   const pages = {};
@@ -5464,16 +5467,45 @@ function paperInkEraseAt(e, cv) {
   if (!hit) return false;
   hit.dead = Date.now(); paperInkMarkDirty(); paperInkPaint(); return true;
 }
+function paperPinchMeasure(a, b) {
+  return {
+    x: (Number(a.x) + Number(b.x)) / 2,
+    y: (Number(a.y) + Number(b.y)) / 2,
+    distance: Math.max(1, Math.hypot(Number(b.x) - Number(a.x), Number(b.y) - Number(a.y))),
+  };
+}
+function paperPinchBegin(cv) {
+  if (!paperSourceSession || !paperSourceSession.inkTouches || paperSourceSession.inkTouches.size < 2) return null;
+  const pair = [...paperSourceSession.inkTouches.values()].slice(0, 2);
+  const measure = paperPinchMeasure(pair[0], pair[1]);
+  const sheet = $('#paper-write-sheet'), pane = cv.closest('.paper-page-viewport');
+  if (!sheet || !pane) return null;
+  const rect = sheet.getBoundingClientRect();
+  return {
+    ids: [pair[0].id, pair[1].id], distance: measure.distance, zoom: paperSourceSession.zoom,
+    sheetX: Math.max(0, Math.min(1, (measure.x - rect.left) / Math.max(1, rect.width))),
+    sheetY: Math.max(0, Math.min(1, (measure.y - rect.top) / Math.max(1, rect.height))),
+    pane,
+  };
+}
 function paperInkDown(e) {
   if (!paperSourceSession) return;
   const cv = e.currentTarget;
   if (e.pointerType === 'touch') {
     e.preventDefault();
-    if (paperSourceSession.inkPointer == null) paperSourceSession.inkTouch = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    if (paperSourceSession.inkPointer != null) return;
+    try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+    paperSourceSession.inkTouches = paperSourceSession.inkTouches || new Map();
+    paperSourceSession.inkTouches.set(e.pointerId, { id: e.pointerId, x: e.clientX, y: e.clientY });
+    if (paperSourceSession.inkTouches.size >= 2) {
+      paperSourceSession.inkTouch = null;
+      if (!paperSourceSession.inkPinch) paperSourceSession.inkPinch = paperPinchBegin(cv);
+    } else paperSourceSession.inkTouch = { id: e.pointerId, x: e.clientX, y: e.clientY };
     return;
   }
   if (!['pen', 'mouse'].includes(e.pointerType || 'mouse')) return;
   e.preventDefault();
+  paperSourceSession.inkTouches = new Map(); paperSourceSession.inkTouch = null; paperSourceSession.inkPinch = null;
   try { cv.setPointerCapture(e.pointerId); } catch (_) {}
   paperSourceSession.inkPointer = e.pointerId;
   if (paperSourceSession.inkMode === 'erase') { paperInkEraseAt(e, cv); return; }
@@ -5482,8 +5514,24 @@ function paperInkDown(e) {
 function paperInkMove(e) {
   if (!paperSourceSession) return;
   if (e.pointerType === 'touch') {
+    const touches = paperSourceSession.inkTouches;
+    if (!touches || !touches.has(e.pointerId) || paperSourceSession.inkPointer != null) return;
+    touches.set(e.pointerId, { id: e.pointerId, x: e.clientX, y: e.clientY });
+    const pinch = paperSourceSession.inkPinch;
+    if (pinch) {
+      const a = touches.get(pinch.ids[0]), b = touches.get(pinch.ids[1]);
+      if (a && b) {
+        e.preventDefault();
+        const measure = paperPinchMeasure(a, b);
+        paperWorkspaceSetZoom(pinch.zoom * measure.distance / pinch.distance, {
+          pane: pinch.pane, sheetX: pinch.sheetX, sheetY: pinch.sheetY,
+          clientX: measure.x, clientY: measure.y,
+        });
+      }
+      return;
+    }
     const touch = paperSourceSession.inkTouch;
-    if (!touch || touch.id !== e.pointerId || paperSourceSession.inkPointer != null) return;
+    if (!touch || touch.id !== e.pointerId) return;
     e.preventDefault();
     const pane = e.currentTarget.closest('.paper-page-viewport');
     const dx = e.clientX - touch.x, dy = e.clientY - touch.y; touch.x = e.clientX; touch.y = e.clientY;
@@ -5505,7 +5553,15 @@ function paperInkMove(e) {
 function paperInkUp(e) {
   if (!paperSourceSession) return;
   if (e.pointerType === 'touch') {
-    if (paperSourceSession.inkTouch && paperSourceSession.inkTouch.id === e.pointerId) paperSourceSession.inkTouch = null;
+    const touches = paperSourceSession.inkTouches;
+    if (touches) touches.delete(e.pointerId);
+    if (paperSourceSession.inkPinch) {
+      paperSourceSession.inkPinch = touches && touches.size >= 2 ? paperPinchBegin(e.currentTarget) : null;
+      if (touches && touches.size === 1) {
+        const remaining = [...touches.values()][0];
+        paperSourceSession.inkTouch = { ...remaining };
+      } else paperSourceSession.inkTouch = null;
+    } else if (paperSourceSession.inkTouch && paperSourceSession.inkTouch.id === e.pointerId) paperSourceSession.inkTouch = null;
     return;
   }
   if (paperSourceSession.inkPointer !== e.pointerId) return;
@@ -5516,6 +5572,7 @@ function paperInkUp(e) {
 }
 function paperInkAttach() {
   const cv = $('#paper-ink-canvas'); if (!cv) return;
+  paperSourceSession.inkTouches = new Map(); paperSourceSession.inkTouch = null; paperSourceSession.inkPinch = null;
   cv.onpointerdown = paperInkDown; cv.onpointermove = paperInkMove;
   cv.onpointerup = cv.onpointercancel = cv.onlostpointercapture = paperInkUp;
   cv.oncontextmenu = (e) => e.preventDefault(); paperInkPaint(); paperInkModeSet(paperSourceSession.inkMode || 'pen');
@@ -5547,11 +5604,20 @@ function paperWorkspacePage(delta) {
 }
 function paperWorkspaceZoom(delta) {
   if (!paperSourceSession) return;
-  paperSourceSession.zoom = Math.max(.75, Math.min(2.5, Math.round((paperSourceSession.zoom + delta) * 4) / 4));
+  paperWorkspaceSetZoom(Math.round((paperSourceSession.zoom + delta) * 4) / 4);
+}
+function paperWorkspaceSetZoom(value, focus) {
+  if (!paperSourceSession) return;
+  paperSourceSession.zoom = Math.max(PAPER_ZOOM_MIN, Math.min(PAPER_ZOOM_MAX, Math.round(Number(value) * 100) / 100));
   const sheet = $('#paper-write-sheet'), label = $('#paper-zoom-label');
   if (sheet) { sheet.style.width = `${paperSourceSession.zoom * 100}%`; sheet.style.maxWidth = `${1180 * paperSourceSession.zoom}px`; }
   if (label) label.textContent = `${Math.round(paperSourceSession.zoom * 100)}%`;
-  setTimeout(paperInkPaint, 30);
+  if (sheet && focus && focus.pane) {
+    const rect = sheet.getBoundingClientRect();
+    focus.pane.scrollLeft += rect.left + focus.sheetX * rect.width - focus.clientX;
+    focus.pane.scrollTop += rect.top + focus.sheetY * rect.height - focus.clientY;
+  }
+  clearTimeout(paperZoomPaintTimer); paperZoomPaintTimer = setTimeout(paperInkPaint, 35);
 }
 function paperAnswerCount(source, run) {
   let n = 0;
@@ -5651,7 +5717,7 @@ function renderPaperSource() {
     <div class="paper-workbar"><div class="paper-workgroup"><button class="paper-icon-btn" onclick="paperWorkspacePage(-1)" ${page <= 0 ? 'disabled' : ''} aria-label="上一頁">${uiIcon('arrow-left')}</button><span class="paper-page-label"><b>${page + 1} / ${source.scans.length}</b><small>${escH(scan.label)}</small></span><button class="paper-icon-btn" onclick="paperWorkspacePage(1)" ${page >= source.scans.length - 1 ? 'disabled' : ''} aria-label="下一頁">${uiIcon('arrow-right')}</button></div>
       <span id="paper-clock" class="timer paper-timer">${fmtClock(left)}</span>
       <div class="paper-workgroup right"><button class="paper-icon-btn" onclick="paperWorkspaceZoom(-.25)" aria-label="縮小題本">−</button><span id="paper-zoom-label" class="paper-zoom-label">${Math.round(paperSourceSession.zoom * 100)}%</span><button class="paper-icon-btn" onclick="paperWorkspaceZoom(.25)" aria-label="放大題本">＋</button><button class="paper-answer-button" onclick="paperAnswerOpen()">${uiIcon('numbers')}<span>答案卡</span><b id="paper-answer-badge">${answered}</b></button><button class="paper-icon-btn" onclick="exitFlow()" aria-label="離開">${uiIcon('x')}</button></div></div>
-    <div class="paper-workspace"><section class="paper-source-pane"><div class="paper-pane-caption"><span>清晰單頁・可直接在題目上寫</span><small id="paper-ink-status">筆跡自動保存</small></div><div class="paper-ink-tools"><button id="paper-tool-pen" onclick="paperInkModeSet('pen')">${uiIcon('pencil')}筆</button><button id="paper-tool-erase" onclick="paperInkModeSet('erase')">${uiIcon('erase')}橡皮擦</button><button onclick="paperInkUndo()">${uiIcon('undo')}復原</button><button onclick="paperInkClear()">${uiIcon('x')}清空本頁筆跡</button></div><div class="paper-page-viewport"><div id="paper-write-sheet" class="paper-write-sheet" data-side="${scan.side}" style="width:${paperSourceSession.zoom * 100}%;max-width:${1180 * paperSourceSession.zoom}px"><div class="paper-question-crop"><img id="paper-source-image" src="${urls[page]}" alt="${escH(source.title)} ${escH(scan.label)}"></div><div class="paper-note-margin" aria-hidden="true"></div><canvas id="paper-ink-canvas" aria-label="可直接書寫的題本頁"></canvas></div><p class="paper-write-hint">觸控筆可寫在題目、選項或右側留白；手指只會捲動頁面。</p></div></section></div>
+    <div class="paper-workspace"><section class="paper-source-pane"><div class="paper-pane-caption"><span>清晰單頁・可直接在題目上寫</span><small id="paper-ink-status">筆跡自動保存</small></div><div class="paper-ink-tools"><button id="paper-tool-pen" onclick="paperInkModeSet('pen')">${uiIcon('pencil')}筆</button><button id="paper-tool-erase" onclick="paperInkModeSet('erase')">${uiIcon('erase')}橡皮擦</button><button onclick="paperInkUndo()">${uiIcon('undo')}復原</button><button onclick="paperInkClear()">${uiIcon('x')}清空本頁筆跡</button></div><div class="paper-page-viewport"><div id="paper-write-sheet" class="paper-write-sheet" data-side="${scan.side}" style="width:${paperSourceSession.zoom * 100}%;max-width:${1180 * paperSourceSession.zoom}px"><div class="paper-question-crop"><img id="paper-source-image" src="${urls[page]}" alt="${escH(source.title)} ${escH(scan.label)}"></div><div class="paper-note-margin" aria-hidden="true"></div><canvas id="paper-ink-canvas" aria-label="可直接書寫的題本頁"></canvas></div><p class="paper-write-hint">觸控筆直接書寫；單指拖動畫面，雙指可縮放並移動，最高放大到 400%。</p></div></section></div>
     <div class="paper-finish-bar"><span>${source.questions} 題・${source.minutes} 分鐘｜已填答案 ${answered} 題</span><button class="btn primary" onclick="paperSourceGrade('主動交卷')">交卷，今天只批分</button></div></div>`;
   sessionChrome(true);
   paperInkAttach();
