@@ -843,6 +843,93 @@ select:focus, textarea:focus, input:focus { outline: 2px solid rgba(117, 103, 92
 .paper-grade-fields label { display: grid; gap: 7px; font-size: 13px; font-weight: 600; }
 .paper-grade-fields input, .paper-grade-fields textarea { width: 100%; }
 .paper-key-wait .notice { margin-top: 13px; }
+
+/* 原版模考平板工作台：固定填滿 viewport，橫向題本／計算紙並排，直向可快速切換。 */
+.paper-session-shell { position: fixed; inset: 0; z-index: 40; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; overflow: hidden; background: #e9e6df; color: var(--text); }
+.paper-workbar { min-height: 58px; display: grid; grid-template-columns: minmax(220px, 1fr) auto minmax(300px, 1fr); align-items: center; gap: 12px; padding: 7px 12px; background: rgba(251, 250, 247, .98); border-bottom: 1px solid var(--border); box-shadow: 0 1px 8px rgba(52, 47, 42, .06); }
+.paper-workgroup { min-width: 0; display: flex; align-items: center; gap: 7px; }
+.paper-workgroup.right { justify-content: flex-end; }
+.paper-icon-btn, .paper-answer-button, .paper-view-switch button, .paper-ink-tools button { appearance: none; min-width: 44px; min-height: 44px; border: 1px solid var(--border); background: #f8f6f1; color: var(--text); border-radius: var(--r-s); font: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.paper-icon-btn:hover, .paper-answer-button:hover, .paper-view-switch button:hover, .paper-ink-tools button:hover { border-color: var(--accent); background: #f0ede7; }
+.paper-icon-btn:disabled { opacity: .34; cursor: default; }
+.paper-icon-btn .ui-icon, .paper-answer-button .ui-icon, .paper-ink-tools .ui-icon { width: 19px; height: 19px; margin: 0; }
+.paper-page-label { min-width: 125px; display: flex; flex-direction: column; align-items: center; line-height: 1.25; }
+.paper-page-label b { font-size: 14px; font-variant-numeric: tabular-nums; }
+.paper-page-label small { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-size: 11px; }
+.paper-timer { min-width: 98px; padding: 5px 12px; text-align: center; background: #eeebe5; border: 1px solid var(--border); border-radius: var(--r-s); font-size: 21px; font-variant-numeric: tabular-nums; }
+.paper-zoom-label { width: 46px; color: var(--dim); font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+.paper-answer-button { min-width: 122px; padding: 0 11px; }
+.paper-answer-button b { min-width: 24px; padding: 1px 6px; border-radius: 10px; background: var(--accent-deep); color: #fff; font-size: 11px; font-variant-numeric: tabular-nums; }
+.paper-view-switch { display: none; grid-template-columns: repeat(3, 1fr); gap: 5px; padding: 6px 10px; background: #f4f1eb; border-bottom: 1px solid var(--border); }
+.paper-view-switch button { min-height: 42px; }
+.paper-view-switch button.active, .paper-ink-tools button.active { border-color: var(--accent-deep); background: var(--accent-deep); color: #fff; }
+.paper-workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 3fr) minmax(340px, 2fr); gap: 1px; overflow: hidden; background: var(--border-strong); }
+.paper-source-pane, .paper-draft-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: #e4e0d8; }
+.paper-draft-pane { overflow-y: auto; overscroll-behavior: contain; background: #e8e4dc; }
+.paper-pane-caption { flex: none; min-height: 35px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 12px; background: #f7f5f0; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--dim); }
+.paper-pane-caption span { color: var(--text); font-weight: 650; }
+.paper-page-viewport { min-height: 0; flex: 1; overflow: auto; overscroll-behavior: contain; background: #d7d2ca; scrollbar-color: #aaa39a transparent; }
+.paper-page-viewport img { display: block; max-width: none; height: auto; margin: 0 auto; background: #fff; box-shadow: 0 2px 12px rgba(42, 38, 34, .14); user-select: none; -webkit-user-drag: none; }
+.paper-ink-tools { position: sticky; top: 0; z-index: 3; flex: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; padding: 7px; background: rgba(248, 246, 241, .96); border-bottom: 1px solid var(--border); backdrop-filter: blur(8px); }
+.paper-ink-tools button { min-width: 0; padding: 0 7px; font-size: 12px; white-space: nowrap; }
+.paper-draft-sheet { position: relative; flex: none; width: min(calc(100% - 18px), 690px); aspect-ratio: 210 / 297; margin: 9px auto; overflow: hidden; background-color: #fcfbf7; background-image: linear-gradient(90deg, transparent 39px, rgba(160, 99, 91, .16) 40px, transparent 41px), repeating-linear-gradient(0deg, transparent 0, transparent 27px, rgba(117, 103, 92, .12) 28px, transparent 29px); border: 1px solid #cbc5bb; box-shadow: 0 3px 14px rgba(52, 47, 42, .1); }
+#paper-ink-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+#paper-ink-canvas[data-mode="erase"] { cursor: cell; }
+.paper-draft-hint { flex: none; margin: 0 12px 14px; color: var(--dim); font-size: 11px; text-align: center; }
+.paper-finish-bar { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 8px 14px; background: rgba(251, 250, 247, .98); border-top: 1px solid var(--border); box-shadow: 0 -2px 12px rgba(52, 47, 42, .08); }
+.paper-finish-bar span { color: var(--dim); font-size: 13px; }
+.paper-finish-bar .btn { min-height: 44px; margin: 0; }
+
+/* 數位答案卡不蓋住題本工作台；每個觸控目標至少 44px，平板可單手劃卡。 */
+.modal-card:has(.paper-answer-modal) { width: min(920px, 96vw); max-width: 920px; max-height: 94dvh; display: flex; flex-direction: column; overflow: hidden; }
+.paper-answer-modal { min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.paper-answer-head { flex: none; display: flex; justify-content: space-between; align-items: end; gap: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.paper-answer-head h2 { margin: 2px 0 0; }
+.paper-answer-head > b { color: var(--accent-deep); font-size: 18px; font-variant-numeric: tabular-nums; }
+.paper-answer-body { min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px 14px; padding: 8px 2px 14px; }
+.paper-answer-row { min-width: 0; min-height: 62px; display: grid; grid-template-columns: 30px 40px minmax(0, 1fr); align-items: center; gap: 7px; padding: 7px 3px; border-bottom: 1px solid #e4e0d8; }
+.paper-answer-row > b { font-size: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+.paper-answer-kind { color: var(--dim); font-size: 11px; }
+.paper-choice-row { display: grid; grid-template-columns: repeat(5, minmax(40px, 1fr)); gap: 5px; }
+.paper-choice { appearance: none; min-width: 40px; min-height: 44px; border: 1px solid var(--border-strong); border-radius: var(--r-s); background: #fff; color: var(--text); font: 600 15px/1 inherit; cursor: pointer; }
+.paper-choice.selected { border-color: var(--accent-deep); background: var(--accent-deep); color: #fff; }
+.paper-choice-row.multi .paper-choice { border-radius: 2px; }
+.paper-fill-answer { width: 100%; min-height: 44px; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: var(--r-s); background: #fff; color: var(--text); font: 16px/1.3 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.paper-fill-answer:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.paper-review-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(360px, .75fr); gap: 14px; align-items: start; }
+.paper-review-source { max-height: calc(100dvh - 110px); overflow: auto; background: #ddd8cf; border: 1px solid var(--border-strong); }
+.paper-review-source .paper-pane-caption { position: sticky; top: 0; z-index: 2; }
+.paper-review-source img { display: block; width: 100%; height: auto; background: #fff; }
+.paper-review-work { position: sticky; top: 12px; margin: 0; }
+.paper-review-work h1 { margin-top: 6px; }
+
+@media (max-width: 900px), (orientation: portrait) {
+  .paper-workbar { grid-template-columns: 1fr auto; min-height: 56px; }
+  .paper-workbar > .paper-timer { grid-column: 2; grid-row: 1; }
+  .paper-workgroup.right { grid-column: 1 / -1; justify-content: flex-end; display: flex; }
+  .paper-workgroup.right .paper-answer-button { flex: 1; }
+  .paper-view-switch { display: grid; }
+  .paper-workspace { grid-template-columns: 1fr; }
+  .paper-session-shell[data-view="source"] .paper-draft-pane { display: none; }
+  .paper-session-shell[data-view="draft"] .paper-source-pane { display: none; }
+  .paper-session-shell[data-view="split"] .paper-workspace { grid-template-rows: minmax(280px, 1fr) minmax(360px, 1fr); overflow-y: auto; }
+  .paper-session-shell[data-view="split"] .paper-source-pane, .paper-session-shell[data-view="split"] .paper-draft-pane { min-height: 62vh; }
+  .paper-finish-bar { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+  .paper-review-layout { grid-template-columns: 1fr; }
+  .paper-review-source { max-height: 52vh; }
+  .paper-review-work { position: static; }
+}
+
+@media (max-width: 620px) {
+  .paper-page-label { min-width: 96px; }
+  .paper-page-label small { max-width: 110px; }
+  .paper-timer { min-width: 90px; font-size: 18px; }
+  .paper-answer-body { grid-template-columns: 1fr; }
+  .paper-finish-bar span { display: none; }
+  .paper-finish-bar .btn { width: 100%; }
+  .paper-ink-tools button { font-size: 0; }
+  .paper-ink-tools button .ui-icon { width: 20px; height: 20px; }
+}
 .vision-rule { margin: 0 0 10px; padding: 10px 14px; background: #ece9e2; border-left: 3px solid #8d8175; color: var(--dim); }
 .vision-rule b { color: var(--text); }
 .vision-paper-progress { height: 4px; margin: 0 0 10px; overflow: hidden; background: #ddd8cf; }
