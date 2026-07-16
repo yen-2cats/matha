@@ -47,8 +47,8 @@ test('原版模考掃描不進公開站資產或離線快取', () => {
   const app = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
   const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
   const names = [...app.matchAll(/file:\s*'(mock-[^']+\.png)'/g)].map((m) => m[1]);
-  assert.equal(names.length, 11);
-  assert.equal(new Set(names).size, 11);
+  assert.equal(names.length, 16);
+  assert.equal(new Set(names).size, 8);
   assert.equal(names.every((name) => !fs.existsSync(path.join(ROOT, name))), true);
   names.forEach((name) => assert.equal(sw.includes(name), false));
 });

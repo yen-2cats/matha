@@ -103,21 +103,52 @@ test('十一單元大綱來源已完整建立語意核對基準', () => {
   assert.equal(run("OUTLINE_DEFAULTS[10].reference.includes('線性變換')"), true);
 });
 
-test('三回私有原版模考依各卷正式題數、100 分鐘並保留封面與全部跨頁', () => {
+test('三回私有原版模考依正式題數拆成清晰單頁，且左右頁共用私有高解析跨頁', () => {
   const { run } = loadApp();
   const result = plain(run(`(() => {
     const scans = PAPER_SOURCES.flatMap((source) => source.scans.map((scan) => scan.file));
-    return { bucket:PAPER_SOURCE_BUCKET, papers:PAPER_SOURCES.map((source) => ({ q:source.questions, min:source.minutes, pages:source.pages, scans:source.scans.length })), scans, unique:new Set(scans).size };
+    return { bucket:PAPER_SOURCE_BUCKET, papers:PAPER_SOURCES.map((source) => ({ q:source.questions, min:source.minutes, pages:source.pages, scans:source.scans.length, sides:source.scans.map((scan) => scan.side) })), scans, unique:new Set(scans).size };
   })()`));
   assert.equal(result.bucket, 'matha-papers');
   assert.deepEqual(result.papers, [
-    { q:20, min:100, pages:6, scans:4 },
-    { q:19, min:100, pages:6, scans:4 },
-    { q:20, min:100, pages:4, scans:3 },
+    { q:20, min:100, pages:6, scans:6, sides:['left','right','left','right','left','right'] },
+    { q:19, min:100, pages:6, scans:6, sides:['left','right','left','right','left','right'] },
+    { q:20, min:100, pages:4, scans:4, sides:['left','right','left','right'] },
   ]);
-  assert.equal(result.scans.length, 11);
-  assert.equal(result.unique, 11);
-  assert.equal(result.scans.every((name) => /^mock-[123]-(?:cover|page-[1-6]-[1-6])\.png$/.test(name)), true);
+  assert.equal(result.scans.length, 16);
+  assert.equal(result.unique, 8);
+  assert.equal(result.scans.every((name) => /^mock-[123]-page-[1-6]-[1-6]\.png$/.test(name)), true);
+});
+
+test('原版工作台把筆跡畫布直接覆蓋在題目與右側留白，不再壓縮成左右分割', () => {
+  const { context, run } = loadApp();
+  context.__app = { innerHTML: '' };
+  context.document.querySelector = (selector) => selector === '#app' ? context.__app : null;
+  const html = run(`(() => {
+    sessionChrome = () => {}; paperInkAttach = () => {}; startTicker = () => {};
+    const source = PAPER_SOURCES[0], row = { id:'write-1', status:'active', remainingMs:6000000, resumeAt:Date.now(), answers:{} };
+    paperSourceSession = { source, run:row, urls:source.scans.map((_, i) => 'blob:' + i), inkPages:{}, page:0, zoom:1, inkMode:'pen' };
+    renderPaperSource();
+    return __app.innerHTML;
+  })()`);
+  assert.match(html, /paper-write-sheet/);
+  assert.match(html, /paper-question-crop/);
+  assert.match(html, /paper-note-margin/);
+  assert.match(html, /可直接書寫的題本頁/);
+  assert.doesNotMatch(html, /paper-draft-pane|paper-view-switch/);
+});
+
+test('原版隔日訂正會定位到每題真正所在的清晰單頁，新舊筆跡版面不混用', () => {
+  const { run } = loadApp();
+  const result = plain(run(`({
+    maps:PAPER_SOURCES.map((source) => source.key.map((_, i) => paperQuestionScanIndex(source, i + 1))),
+    qid:paperInkQid({id:'run-1'}, 3), version:PAPER_LAYOUT_VERSION,
+  })`));
+  assert.deepEqual(result.maps[0], [0,0,0,0,0,1,1,1,2,2,2,3,3,3,4,4,4,5,5,5]);
+  assert.deepEqual(result.maps[1], [0,0,0,0,1,1,1,2,2,2,3,3,3,4,4,4,4,5,5]);
+  assert.deepEqual(result.maps[2], [0,0,0,0,0,1,1,1,2,2,2,2,2,3,3,3,3,3,3,3]);
+  assert.equal(result.version, 2);
+  assert.equal(result.qid, 'paper:run-1:v2:3');
 });
 
 test('原版模考批分只保存分數與錯題號，隔天鎖定且不捏造答案', () => {
