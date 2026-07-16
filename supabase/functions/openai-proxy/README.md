@@ -2,6 +2,8 @@
 
 這個 Edge Function 是數A前端與 OpenAI Responses API 之間的安全代理。`OPENAI_API_KEY` 只存在 Supabase Secret，不會進入 `app.js`、localStorage、`app_state`、備份或公開 GitHub 程式碼。
 
+目前支援四種嚴格 JSON Schema 回傳：一般手寫答案批改（`grade`）、解題過程分析（`process`）、十一單元手寫大綱比對（`outline`）與定義語意理解（`concept`）。手寫大綱以 Responses API 圖片輸入的 `detail: original` 傳入，密集文字不先縮成低解析度；大綱原文只來自使用者的私人內容層。
+
 ## 專案配置
 
 - 可管理的 Supabase 專案 `rrihysbxhsbxjteqmtdu` 同時負責登入、學習資料、私有題庫 Storage、`openai-proxy` 與 OpenAI Secret，不再依賴舊專案。

@@ -87,6 +87,32 @@ const responseSchemas = {
     properties: sharedProperties,
     required: ["firstError", "errKind", "praise", "nextTime", "marks", "stuck"],
   },
+  outline: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      readable: { type: "boolean" },
+      coverage: { type: "integer", minimum: 0, maximum: 100 },
+      covered: { type: "array", maxItems: 20, items: { type: "string", maxLength: 80 } },
+      missing: { type: "array", maxItems: 20, items: { type: "string", maxLength: 80 } },
+      inaccurate: { type: "array", maxItems: 12, items: { type: "string", maxLength: 120 } },
+      nextFocus: { type: "string", maxLength: 160 },
+    },
+    required: ["readable", "coverage", "covered", "missing", "inaccurate", "nextFocus"],
+  },
+  concept: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      understood: { type: "boolean" },
+      accurate: { type: "array", maxItems: 8, items: { type: "string", maxLength: 100 } },
+      missing: { type: "array", maxItems: 8, items: { type: "string", maxLength: 100 } },
+      misconception: nullableText,
+      clearerVersion: { type: "string", maxLength: 260 },
+      nextPrompt: { type: "string", maxLength: 140 },
+    },
+    required: ["understood", "accurate", "missing", "misconception", "clearerVersion", "nextPrompt"],
+  },
 };
 
 function normalizeMessages(raw: unknown) {
@@ -188,11 +214,11 @@ Deno.serve(async (req: Request) => {
     if (new TextEncoder().encode(raw).byteLength > MAX_BODY_BYTES) return reply(origin, 413, { message: "請求內容過大" });
     const body = JSON.parse(raw || "{}");
     const responseType = String(body.responseType || "");
-    if (!["grade", "process", "text", "test"].includes(responseType)) return reply(origin, 400, { message: "responseType 不合法" });
+    if (!["grade", "process", "outline", "concept", "text", "test"].includes(responseType)) return reply(origin, 400, { message: "responseType 不合法" });
 
     const model = Deno.env.get("OPENAI_MODEL") || "gpt-5.6";
     const isTest = responseType === "test";
-    const isStructured = responseType === "grade" || responseType === "process";
+    const isStructured = ["grade", "process", "outline", "concept"].includes(responseType);
     const instructions = isTest
       ? "Reply with exactly OK."
       : String(body.instructions || (isStructured ? "依照 JSON Schema 回覆，不要增加 schema 外欄位。" : ""));
@@ -209,7 +235,7 @@ Deno.serve(async (req: Request) => {
       safety_identifier: await safetyIdentifier(userId),
       metadata: { app: "matha", response_type: responseType },
       text: isStructured
-        ? { format: { type: "json_schema", name: `matha_${responseType}`, strict: true, schema: responseSchemas[responseType as "grade" | "process"] } }
+        ? { format: { type: "json_schema", name: `matha_${responseType}`, strict: true, schema: responseSchemas[responseType as "grade" | "process" | "outline" | "concept"] } }
         : { format: { type: "text" } },
     };
 
