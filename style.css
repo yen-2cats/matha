@@ -823,6 +823,8 @@ select:focus, textarea:focus, input:focus { outline: 2px solid rgba(117, 103, 92
 .choice-card .actr { margin-top: auto; }
 .vision-rule { margin: 0 0 10px; padding: 10px 14px; background: #ece9e2; border-left: 3px solid #8d8175; color: var(--dim); }
 .vision-rule b { color: var(--text); }
+.vision-paper-progress { height: 4px; margin: 0 0 10px; overflow: hidden; background: #ddd8cf; }
+.vision-paper-progress span { display: block; height: 100%; background: var(--accent); transition: width .2s ease; }
 .eye-question { position: relative; padding: 0 0 24px; margin-bottom: 12px; background: var(--paper); border: 1px solid var(--paper-border); border-radius: 2px; box-shadow: var(--sh-1); }
 .eye-question .bk-head { padding-inline: 18px; }
 .eye-question .bk-item { padding: 22px 26px 10px 42px; }
@@ -853,6 +855,7 @@ select:focus, textarea:focus, input:focus { outline: 2px solid rgba(117, 103, 92
 .teacher-attempt { border-top: 1px solid var(--border); }
 .teacher-attempt p { margin: 5px 0 0; white-space: pre-wrap; }
 .new-progress-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 14px 0 18px; }
+.vision-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .new-progress-grid section { min-height: 118px; padding: 15px; display: flex; flex-direction: column; background: #f5f3ee; border: 1px solid var(--border); }
 .new-progress-grid span, .new-progress-grid small { color: var(--dim); }
 .new-progress-grid b { margin: 9px 0 5px; font-size: 24px; font-weight: 580; }
@@ -873,7 +876,7 @@ select:focus, textarea:focus, input:focus { outline: 2px solid rgba(117, 103, 92
   .bank-health { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 440px) {
-  .recall-grid, .concept-grid, .new-progress-grid { grid-template-columns: 1fr; }
+  .recall-grid, .concept-grid, .new-progress-grid, .vision-summary { grid-template-columns: 1fr; }
   .recall-paper-head { padding-inline: 18px; }
 }
 @media print {

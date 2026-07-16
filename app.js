@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0717a'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0717b'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -2272,7 +2272,7 @@ function nextBestAction() {
   };
   const visionDue = visionDueEntries();
   if (visionDue.length) return {
-    kind: 'vision', title: `再給第 ${visionDue[0].examNo || '—'} 題一次機會`, why: '昨天想不到方向的題，今天再只看題目找一次切入點；仍沒有方向才看詳解。', time: '約 5 分鐘', onclick: `startVisionScan('${visionDue[0].id}')`, button: '第二天再想',
+    kind: 'vision', title: `再給 ${visionDue.length} 題一次機會`, why: '昨天想不到方向的題，今天再只看題目找一次切入點；仍沒有方向才看詳解。', time: `約 ${Math.max(5, visionDue.length * 4)} 分鐘`, onclick: `startVisionScan('${visionDue[0].id}')`, button: '第二天再想',
   };
   const cal = mockCalibration();
   if (!cal.count) return {
@@ -2287,7 +2287,7 @@ function nextBestAction() {
   }
   const concept = conceptDueCards()[0];
   if (concept) return { kind: 'concept', title: `用自己的話說明「${concept.title}」`, why: '不背字句；說清楚真正意思、限制與一個例子，AI 再檢查語意缺口。', time: '約 5 分鐘', onclick: `startConceptCheck('${concept.id}')`, button: '開始說明' };
-  return { kind: 'vision', title: '只用眼睛刷一題', why: '不計算，只寫出一個可行的破題方向；卡住的題保留到明天再想。', time: '約 5 分鐘', onclick: 'startVisionScan()', button: '開始找方向' };
+  return { kind: 'vision', title: '用眼睛刷一整回', why: '依學測 20 題完整結構逐題找破題方向，不展開計算；卡住的題保留到明天再想。', time: '約 40 分鐘', onclick: 'startVisionScan()', button: '開始 20 題找方向' };
 }
 function nextActionCard() {
   const a = nextBestAction();
@@ -3033,14 +3033,22 @@ function exitFlow(view) {
     return;
   }
   if (sessionMode === 'vision') {
-    modal('<h2>要暫停這題嗎？</h2><p>尚未完成的方向不算一次訓練；已送出的第一天紀錄仍會保留。</p>', [
-      ['繼續', resume, 'primary'],
-      ['暫停並離開', () => {
-        if (vision && vision.entry && !(vision.entry.attempts || []).length) S.visionQueue = (S.visionQueue || []).filter((x) => x.id !== vision.entry.id);
-        else if (vision && vision.entry && !vision.entry.done) { vision.entry.stage = 'waiting'; vision.entry.due = today(); vision.entry.mt = Date.now(); }
-        save(); endSession(); nav(goto);
-      }],
-    ]);
+    if (vision && vision.paperRun) {
+      const doneN = vision.paperEntries.filter((x) => x.paperSeen).length;
+      modal(`<h2>要暫停這一整回嗎？</h2><p>本回已完成 <b>${doneN}/20</b> 題；進度會保留，下次從目前這題繼續。尚未送出的文字不會算一次紀錄。</p>`, [
+        ['繼續本回', resume, 'primary'],
+        ['保留進度，離開', () => { save(); endSession(); vision = null; nav(goto); }],
+      ]);
+    } else {
+      modal('<h2>要暫停這題嗎？</h2><p>尚未完成的方向不算一次訓練；已送出的第一天紀錄仍會保留。</p>', [
+        ['繼續', resume, 'primary'],
+        ['暫停並離開', () => {
+          if (vision && vision.entry && !(vision.entry.attempts || []).length) S.visionQueue = (S.visionQueue || []).filter((x) => x.id !== vision.entry.id);
+          else if (vision && vision.entry && !vision.entry.done) { vision.entry.stage = 'waiting'; vision.entry.due = today(); vision.entry.mt = Date.now(); }
+          save(); endSession(); vision = null; nav(goto);
+        }],
+      ]);
+    }
     return;
   }
   if (sessionMode === 'prac' || sessionMode === 'review' || sessionMode === 'correction') {
@@ -3111,6 +3119,8 @@ function renderHome() {
   const outlineReady = outlineUnits().filter((x) => x.reference).length;
   const outlineDue = outlineDueUnits().length;
   const visionDue = visionDueEntries().length;
+  const visionPaper = visionActivePaperEntries();
+  const visionPaperDone = visionPaper ? visionPaper.filter((x) => x.paperSeen).length : 0;
   const conceptDue = conceptDueCards().length;
   app().innerHTML = `
   <div class="hero">
@@ -3120,7 +3130,7 @@ function renderHome() {
   ${nextActionCard()}
   <div class="task-strip">
     <button onclick="nav('outline')"><span>大綱默寫</span><b>${outlineReady ? `${outlineDue} 份到期` : '等待 11 份大綱'}</b></button>
-    <button onclick="nav('mock')"><span>模考與破題</span><b>${visionDue ? `${visionDue} 題第二天` : '找一個切入點'}</b></button>
+    <button onclick="nav('mock')"><span>模考與破題</span><b>${visionDue ? `${visionDue} 題第二天` : visionPaper ? `眼睛刷題 ${visionPaperDone}/20` : '眼睛刷題 20 題'}</b></button>
     <button onclick="nav('concept')"><span>觀念理解</span><b>${conceptDue} 張待說明</b></button>
   </div>
   <div class="card"><h2>現在的訓練規則</h2>
@@ -4863,6 +4873,9 @@ function renderMockIntro() {
   const n = S.mocks.length;
   const due = visionDueEntries();
   const waiting = (S.visionQueue || []).filter((x) => !x.done && x.stage === 'waiting' && String(x.due || '') > today());
+  const activePaper = visionActivePaperEntries();
+  const activeDone = activePaper ? activePaper.filter((x) => x.paperSeen).length : 0;
+  const completedPapers = visionCompletedPaperCount();
   app().innerHTML = `
     <div class="hero compact"><h1>模考與破題</h1><p>同一批混合題，分成兩種完全不同的訓練：完整模考建立真實成績；眼睛刷題只練從題目找到第一個切入點。</p></div>
     ${due.length ? `<div class="card next-action"><div><span class="eyebrow">第二天到期</span><h2>${due.length} 題昨天沒有方向</h2><p>今天再看一次題目。仍無方向，才開詳解。</p></div><button class="btn primary" onclick="startVisionScan('${due[0].id}')">再想一次</button></div>` : ''}
@@ -4873,11 +4886,11 @@ function renderMockIntro() {
       <p class="dim">最後 3 題固定抽取同一組共享情境的混合題組，保留 3、4、8 分的連動小題結構。你拍完整紙本模考後，也能依原頁面、題幹與題組關係匯入。已完成 ${n} 次模考。</p>
       <div class="actr"><button class="btn primary big" onclick="startMock()">開始一整回（100:00）</button></div>
     </section>
-    <section class="card choice-card"><span class="eyebrow">不計算</span><h2>用眼睛刷題</h2>
-      <p>只讀題、寫出一個破題方向，接著對照詳解判斷這條路是否成立。不要展開計算。</p>
-      <p>一眼就知道怎麼做且很可能作對，可直接略過；完全沒方向則留下所屬單元／觀念，隔天再給它一次機會。</p>
-      <p class="dim">等待明天 ${waiting.length} 題｜今天到期 ${due.length} 題</p>
-      <div class="actr"><button class="btn primary big" onclick="startVisionScan()">看一題，只找方向</button></div>
+    <section class="card choice-card"><span class="eyebrow">完整一回，不計算</span><h2>用眼睛刷題</h2>
+      <p><b>20 題完整學測結構</b>｜6 單選、6 多選、5 選填、3 題共享題幹混合題組。逐題只寫破題方向，不展開計算。</p>
+      <p>有方向就對照詳解判斷這條路是否成立；一眼就會可略過；完全沒方向則留下所屬單元／觀念，隔天再給它一次機會。</p>
+      <p class="dim">已完成 ${completedPapers} 整回｜等待明天 ${waiting.length} 題｜今天到期 ${due.length} 題</p>
+      <div class="actr"><button class="btn primary big" onclick="startVisionScan()">${activePaper ? `繼續本回（${activeDone}/20）` : '開始一整回（20 題）'}</button></div>
     </section></div>`;
 }
 
@@ -4895,31 +4908,77 @@ function visionPickQuestion() {
   const ac = attCountMap();
   return shuffle(pool).sort((a, b) => (ac.get(a.id) || 0) - (ac.get(b.id) || 0) || Number(b.diff || 0) - Number(a.diff || 0))[0];
 }
+function visionPaperGroups() {
+  const groups = new Map();
+  for (const entry of S.visionQueue || []) {
+    if (!entry || !entry.paperId) continue;
+    if (!groups.has(entry.paperId)) groups.set(entry.paperId, []);
+    groups.get(entry.paperId).push(entry);
+  }
+  return [...groups.values()].map((entries) => entries.sort((a, b) => Number(a.paperIndex || 0) - Number(b.paperIndex || 0)))
+    .sort((a, b) => Number(a[0] && a[0].paperTs || 0) - Number(b[0] && b[0].paperTs || 0));
+}
+function visionActivePaperEntries() {
+  return visionPaperGroups().find((entries) => entries.some((x) => !x.paperSeen)) || null;
+}
+function visionCompletedPaperCount() {
+  return visionPaperGroups().filter((entries) => entries.length === MOCK_SPEC.total && entries.every((x) => x.paperSeen)).length;
+}
+function visionQuestionFromEntry(entry) {
+  const base = bankById(entry.qid);
+  return base ? { ...base, examNo: entry.examNo || null, examSection: entry.examSection || null, points: entry.points || null } : null;
+}
+function visionOpenEntry(entry, paperEntries, paperRun) {
+  const q = visionQuestionFromEntry(entry);
+  if (!q) {
+    entry.done = true; entry.paperSeen = true; entry.stage = 'done'; entry.outcome = 'missing'; entry.mt = Date.now(); save();
+    if (paperRun) return visionAdvancePaper(paperEntries);
+    renderMockIntro(); return;
+  }
+  vision = { entry, q, paperEntries: paperEntries || null, paperRun: !!paperRun };
+  sessionActive = true; sessionMode = 'vision';
+  const lastAttempt = (entry.attempts || [])[entry.attempts.length - 1];
+  if (entry.stage === 'compare' && entry.solutionUnlockedAt && lastAttempt) renderVisionCompare(!!lastAttempt.hasDirection);
+  else renderVisionWork();
+}
 function startVisionScan(entryId) {
   if (!syncGate()) return;
-  let entry = entryId && (S.visionQueue || []).find((x) => x.id === entryId && !x.done);
-  if (entry && entry.stage === 'waiting' && String(entry.due || '') > today()) { alert(`這題要到 ${entry.due} 再想；先讓腦袋真正隔一天。`); return; }
-  if (!entry) {
-    const q = visionPickQuestion(); if (!q) { alert('目前找不到新的混合題。'); return; }
-    const ts = Date.now();
-    entry = { id: `vision-${ts}`, qid: q.id, examNo: q.no || null, d: today(), ts, mt: ts, due: null, stage: 'new', attempts: [], done: false };
-    S.visionQueue = S.visionQueue || []; S.visionQueue.push(entry); save();
+  if (entryId) {
+    const entry = (S.visionQueue || []).find((x) => x.id === entryId && !x.done);
+    if (!entry) { renderMockIntro(); return; }
+    if (entry.stage === 'waiting' && String(entry.due || '') > today()) { alert(`這題要到 ${entry.due} 再想；先讓腦袋真正隔一天。`); return; }
+    visionOpenEntry(entry, null, false);
+    return;
   }
-  const q = bankById(entry.qid); if (!q) { entry.done = true; save(); renderMockIntro(); return; }
-  vision = { entry, q };
-  sessionActive = true; sessionMode = 'vision';
-  renderVisionWork();
+  let entries = visionActivePaperEntries();
+  if (!entries) {
+    const paper = buildPaper(true);
+    if (paper.length !== MOCK_SPEC.total) { alert(`題庫目前只能組出 ${paper.length} 題，尚不足完整 20 題眼睛刷題。`); return; }
+    const ts = Date.now(), paperId = `vision-paper-${ts}`;
+    entries = paper.map((q, index) => ({
+      id: `${paperId}-${index + 1}`, paperId, paperTs: ts, paperIndex: index,
+      mixedGroupId: buildPaper.lastMixedGroupId || null,
+      qid: q.id, examNo: q.examNo, examSection: q.examSection, points: q.points,
+      d: today(), ts: ts + index, mt: ts, due: null, stage: 'new', attempts: [], done: false, paperSeen: false,
+    }));
+    S.visionQueue = S.visionQueue || []; S.visionQueue.push(...entries); save();
+  }
+  const entry = entries.find((x) => !x.paperSeen);
+  if (!entry) { renderVisionPaperResult(entries); return; }
+  visionOpenEntry(entry, entries, true);
 }
 function visionQuestionHTML(q) {
-  return `<div class="eye-question"><div class="bk-head"><span class="bk-exam">數學Ａ</span><span class="bk-sect">混合辨識</span></div>
-    <div class="bk-item"><span class="bk-num">※</span><div class="bk-content">${q.stem ? `<div class="bk-stem">${rtTxt(q.stem)}</div>` : ''}${rtTxt(q.q)}${q.fig ? `<div class="qfig">${sanitizeSVG(q.fig)}</div>` : ''}${q.opts ? `<div class="eye-options">${q.opts.map((o, i) => `<p>(${i + 1}) ${rtTxt(o)}</p>`).join('')}</div>` : ''}</div></div></div>`;
+  return `<div class="eye-question"><div class="bk-head"><span class="bk-exam">數學Ａ</span><span class="bk-sect">${escH(sectionLabel(q))}</span></div>
+    <div class="bk-item"><span class="bk-num">${q.examNo ? `${q.examNo}.` : '※'}</span><div class="bk-content">${q.stem ? `<div class="bk-stem">${rtTxt(q.stem)}</div>` : ''}${rtTxt(q.q)}${q.fig ? `<div class="qfig">${sanitizeSVG(q.fig)}</div>` : ''}${q.opts ? `<div class="eye-options">${q.opts.map((o, i) => `<p>(${i + 1}) ${rtTxt(o)}</p>`).join('')}</div>` : ''}</div></div></div>`;
 }
 function renderVisionWork() {
   const { entry, q } = vision;
   const prior = (entry.attempts || []).map((a, i) => `<li>第 ${i + 1} 天：${a.direction ? escH(a.direction) : `沒有方向；猜 ${escH(TOPICS[a.topic] || '未選單元')}${a.concept ? `／${escH(a.concept)}` : ''}`}</li>`).join('');
   const second = (entry.attempts || []).length > 0;
-  app().innerHTML = `<div class="session-head"><span>眼睛刷題｜${second ? '第二天再想' : '第一眼找方向'}</span><button class="btn sm xbtn" onclick="exitFlow()" title="離開">✕</button></div>
-    <div class="vision-rule"><b>今天不計算。</b>目標只有一個：說出第一步為什麼值得做，以及下一步想得到什麼。</div>
+  const doneN = vision.paperRun ? vision.paperEntries.filter((x) => x.paperSeen).length : 0;
+  app().innerHTML = `<div class="session-head"><span>${vision.paperRun ? `眼睛刷題整回｜第 ${q.examNo}/20 題｜${escH(sectionLabel(q))}` : `眼睛刷題｜${second ? '第二天再想' : '第一眼找方向'}`}</span><button class="btn sm xbtn" onclick="exitFlow()" title="離開">✕</button></div>
+    ${vision.paperRun ? `<div class="vision-paper-progress" aria-label="本回進度 ${doneN} / 20"><span style="width:${doneN / 20 * 100}%"></span></div>` : ''}
+    <div class="vision-rule"><b>今天不計算。</b>${vision.paperRun ? `本回維持學測 20 題結構，目前第 ${q.examNo} 題。` : ''}目標只有一個：說出第一步為什麼值得做，以及下一步想得到什麼。</div>
     ${visionQuestionHTML(q)}
     <div class="card direction-form">
       ${prior ? `<details open><summary>上次留下的紀錄</summary><ol>${prior}</ol></details>` : ''}
@@ -4951,7 +5010,8 @@ function visionSubmit(hasDirection) {
   entry.attempts.push({ d: today(), ts: Date.now(), hasDirection: !!hasDirection, ...data });
   entry.mt = Date.now();
   if (!hasDirection && priorN === 0) {
-    entry.stage = 'waiting'; entry.due = addDays(today(), 1); save();
+    entry.stage = 'waiting'; entry.due = addDays(today(), 1); entry.paperSeen = !!vision.paperRun; save();
+    if (vision.paperRun) { visionAdvancePaper(vision.paperEntries); return; }
     sessionActive = false; sessionMode = null; sessionChrome(false); vision = null;
     app().innerHTML = `<h1>已把這題圈到明天</h1><div class="card waiting-card"><b>詳解仍鎖住</b><p>你已留下「${escH(TOPICS[data.topic] || data.concept)}」這個初步辨認。<b>${entry.due}</b> 再看同一題一次；到時仍沒有方向，才開詳解。</p>
       <div class="actr"><button class="btn" onclick="nav('mock')">回模考與破題</button><button class="btn primary" onclick="nav('home')">回今日</button></div></div>`;
@@ -4963,7 +5023,9 @@ function visionSubmit(hasDirection) {
 function renderVisionCompare(hadDirection) {
   const { entry, q } = vision;
   const last = entry.attempts[entry.attempts.length - 1];
-  app().innerHTML = `<div class="session-head"><span>方向對照｜${hadDirection ? '檢查這條路' : '第二天後開詳解'}</span><button class="btn sm xbtn" onclick="exitFlow()" title="離開">✕</button></div>
+  const doneN = vision.paperRun ? vision.paperEntries.filter((x) => x.paperSeen).length : 0;
+  app().innerHTML = `<div class="session-head"><span>${vision.paperRun ? `眼睛刷題整回｜第 ${q.examNo}/20 題｜方向對照` : `方向對照｜${hadDirection ? '檢查這條路' : '第二天後開詳解'}`}</span><button class="btn sm xbtn" onclick="exitFlow()" title="離開">✕</button></div>
+    ${vision.paperRun ? `<div class="vision-paper-progress" aria-label="本回進度 ${doneN} / 20"><span style="width:${doneN / 20 * 100}%"></span></div>` : ''}
     ${visionQuestionHTML(q)}
     <div class="card your-direction"><span class="eyebrow">你先留下的內容</span><p>${last.direction ? escH(last.direction) : `沒有方向；猜測 ${escH(TOPICS[last.topic] || '')}${last.concept ? `／${escH(last.concept)}` : ''}`}</p>${last.alternate ? `<p class="dim">另一條路：${escH(last.alternate)}</p>` : ''}</div>
     <div class="card solution-compare"><span class="eyebrow">現在才看的詳解</span><div>${rtTxt(q.sol || '這題目前沒有詳解。')}</div>${q.solFig ? `<div class="qfig">${sanitizeSVG(q.solFig)}</div>` : ''}${q.tip ? `<p class="tip">${rtTxt(q.tip)}</p>` : ''}</div>
@@ -4975,25 +5037,50 @@ function renderVisionCompare(hadDirection) {
 function visionFinish(outcome) {
   if (!vision) return;
   const { entry, q } = vision, learned = (($('#vision-learned') || {}).value || '').trim();
-  entry.done = true; entry.stage = 'done'; entry.outcome = outcome; entry.learned = learned.slice(0, 500); entry.completedAt = Date.now(); entry.mt = Date.now();
+  entry.done = true; entry.paperSeen = entry.paperSeen || !!vision.paperRun; entry.stage = 'done'; entry.outcome = outcome; entry.learned = learned.slice(0, 500); entry.completedAt = Date.now(); entry.mt = Date.now();
   S.visionHistory = S.visionHistory || [];
-  S.visionHistory.push({ id: `vision-result-${entry.id}`, qid: q.id, d: today(), ts: Date.now(), outcome, days: (entry.attempts || []).length, attempts: entry.attempts, learned: entry.learned });
-  save(); sessionActive = false; sessionMode = null; sessionChrome(false); vision = null;
+  S.visionHistory.push({ id: `vision-result-${entry.id}`, paperId: entry.paperId || null, examNo: entry.examNo || null, examSection: entry.examSection || null, qid: q.id, d: today(), ts: Date.now(), outcome, days: (entry.attempts || []).length, attempts: entry.attempts, learned: entry.learned });
+  save();
+  if (vision.paperRun) { visionAdvancePaper(vision.paperEntries); return; }
+  sessionActive = false; sessionMode = null; sessionChrome(false); vision = null;
   app().innerHTML = `<h1>這題的方向紀錄完成</h1><div class="card good"><p class="big">${outcome === 'works' ? '你的第一條路成立。' : outcome === 'different' ? '你找到一條路，也從詳解多收一條。' : outcome === 'fails' ? '你已辨認原方向為什麼走不通。' : '這題確實用了兩天，現在才收下詳解的切入點。'}</p>
-    <p>今天的成果不是算出數字，而是讓「看到題目後先去哪裡」變得更容易被叫出來。</p><div class="actr"><button class="btn" onclick="nav('mock')">回入口</button><button class="btn primary" onclick="startVisionScan()">再看一題</button></div></div>`;
+    <p>今天的成果不是算出數字，而是讓「看到題目後先去哪裡」變得更容易被叫出來。</p><div class="actr"><button class="btn" onclick="nav('mock')">回入口</button><button class="btn primary" onclick="startVisionScan()">開始一整回</button></div></div>`;
 }
 function visionKnown() {
   if (!vision) return;
   const { entry, q } = vision;
-  entry.done = true; entry.stage = 'done'; entry.outcome = 'obvious'; entry.completedAt = Date.now(); entry.mt = Date.now();
-  S.visionHistory = S.visionHistory || []; S.visionHistory.push({ id: `vision-obvious-${Date.now()}`, qid: q.id, d: today(), ts: Date.now(), outcome: 'obvious', days: 0 });
-  save(); sessionActive = false; sessionMode = null; sessionChrome(false); vision = null;
-  app().innerHTML = `<h1>已略過明顯會寫的題</h1><div class="card"><p>沒有花時間展開計算，符合老師目前的優先順序。</p><div class="actr"><button class="btn" onclick="nav('mock')">回入口</button><button class="btn primary" onclick="startVisionScan()">再看一題</button></div></div>`;
+  entry.done = true; entry.paperSeen = entry.paperSeen || !!vision.paperRun; entry.stage = 'done'; entry.outcome = 'obvious'; entry.completedAt = Date.now(); entry.mt = Date.now();
+  S.visionHistory = S.visionHistory || []; S.visionHistory.push({ id: `vision-obvious-${entry.id}`, paperId: entry.paperId || null, examNo: entry.examNo || null, examSection: entry.examSection || null, qid: q.id, d: today(), ts: Date.now(), outcome: 'obvious', days: 0 });
+  save();
+  if (vision.paperRun) { visionAdvancePaper(vision.paperEntries); return; }
+  sessionActive = false; sessionMode = null; sessionChrome(false); vision = null;
+  app().innerHTML = `<h1>已略過明顯會寫的題</h1><div class="card"><p>沒有花時間展開計算，符合老師目前的優先順序。</p><div class="actr"><button class="btn" onclick="nav('mock')">回入口</button><button class="btn primary" onclick="startVisionScan()">開始一整回</button></div></div>`;
+}
+function visionAdvancePaper(entries) {
+  const next = (entries || []).find((x) => !x.paperSeen);
+  if (next) { visionOpenEntry(next, entries, true); return; }
+  sessionActive = false; sessionMode = null; sessionChrome(false); vision = null;
+  renderVisionPaperResult(entries || []);
+}
+function renderVisionPaperResult(entries) {
+  const obvious = entries.filter((x) => x.outcome === 'obvious').length;
+  const directions = entries.filter((x) => ['works', 'different', 'fails'].includes(x.outcome)).length;
+  const waiting = entries.filter((x) => !x.done && x.stage === 'waiting').length;
+  const missing = entries.filter((x) => x.outcome === 'missing').length;
+  app().innerHTML = `<h1>完成一整回眼睛刷題</h1><div class="card good">
+    <p class="big"><b>20 / 20 題</b>｜維持 6 單選、6 多選、5 選填、3 題共享題幹混合題組。</p>
+    <div class="new-progress-grid vision-summary"><section><span>找到並對照方向</span><b>${directions}</b><small>題</small></section><section><span>一眼明顯會寫</span><b>${obvious}</b><small>題，沒有浪費時間計算</small></section><section><span>圈到明天</span><b>${waiting}</b><small>題，詳解仍鎖住</small></section></div>
+    ${missing ? `<p class="warnc">有 ${missing} 題因題庫內容暫時無法取得而略過，未計入訓練成果。</p>` : ''}
+    <p>這一回練的是完整考卷裡連續切換題型時，能不能替每題叫出第一個可行方向。</p>
+    <div class="actr"><button class="btn" onclick="nav('mock')">回模考與破題</button><button class="btn primary" onclick="startVisionScan()">開始下一整回</button></div></div>`;
+  sessionChrome(false);
 }
 let mock = null;
-function buildPaper() {
+function buildPaper(forVision) {
   const usedIds = new Set(), usedGroups = new Set(), topicUse = {};
   const ac = attCountMap();
+  const visionUse = new Map();
+  if (forVision) for (const row of S.visionHistory || []) visionUse.set(row.qid, (visionUse.get(row.qid) || 0) + 1);
   const eligible = (q) => !usedIds.has(q.id) && !(q.grp && usedGroups.has(q.grp)) && !(q.src && packIsOff(q.src));
   const choose = (type, count, diffPattern) => {
     const out = [];
@@ -5002,14 +5089,17 @@ function buildPaper() {
       let pool = BANK.filter((q) => q.type === type && q.diff === want && eligible(q));
       if (!pool.length) pool = BANK.filter((q) => q.type === type && eligible(q));
       pool.sort((a, b) => ((topicUse[a.topic] || 0) - (topicUse[b.topic] || 0))
-        || ((ac.get(a.id) || 0) - (ac.get(b.id) || 0)) || (Math.random() - 0.5));
+        || (((ac.get(a.id) || 0) + (visionUse.get(a.id) || 0) * 4) - ((ac.get(b.id) || 0) + (visionUse.get(b.id) || 0) * 4)) || (Math.random() - 0.5));
       const q = pool[0]; if (!q) break;
       usedIds.add(q.id); if (q.grp) usedGroups.add(q.grp); topicUse[q.topic] = (topicUse[q.topic] || 0) + 1;
       out.push(q);
     }
     return out;
   };
-  const previousGroup = (S.mocks && S.mocks.length) ? S.mocks[S.mocks.length - 1].mixedGroupId : null;
+  const lastVisionPaper = forVision ? (S.visionQueue || []).filter((x) => x.paperId && x.mixedGroupId).sort((a, b) => Number(b.paperTs || 0) - Number(a.paperTs || 0))[0] : null;
+  const previousGroup = forVision
+    ? (lastVisionPaper && lastVisionPaper.mixedGroupId)
+    : ((S.mocks && S.mocks.length) ? S.mocks[S.mocks.length - 1].mixedGroupId : null);
   const candidates = MOCK_MIXED_GROUPS.filter((g) => g.id !== previousGroup);
   const mixedGroup = (candidates.length ? candidates : MOCK_MIXED_GROUPS)[Math.floor(Math.random() * (candidates.length || MOCK_MIXED_GROUPS.length))];
   const mixedQuestions = mixedGroup.items.map((q, index) => ({
