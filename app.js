@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0716h'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0716j'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -15,7 +15,10 @@ function stripLegacyAiSecrets(state) {
   return clean;
 }
 function load() {
-  const def = { attempts: [], wrong: {}, drills: {}, mocks: [], corrections: [], daily: {}, ver: 2 };
+  const def = {
+    attempts: [], wrong: {}, drills: {}, mocks: [], corrections: [], daily: {},
+    outlineAttempts: [], visionQueue: [], visionHistory: [], conceptAttempts: [], ver: 3,
+  };
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
@@ -115,12 +118,13 @@ function packIsOff(src) {
    表還沒建 → 完全維持舊行為（內容照舊放 S），零風險降級。 */
 const SPLIT_LS = 'mathA13_split_v1';
 const CONTENT_LS = 'mathA13_content_v1'; // IndexedDB 不可用時的後備
-let CONTENT = { packs: {} }; // pack_id → { kind:'qpack'|'notes'|'flash', name, rev, items:[…] }
+let CONTENT = { packs: {} }; // pack_id → { kind:'qpack'|'notes'|'flash'|'outline', name, rev, items:[…] }
 let contentTableMissing = false;
 function splitOn() { try { return localStorage.getItem(SPLIT_LS) === '1'; } catch (e) { return false; } }
 function extBankArr() { return splitOn() ? contentByKind('qpack') : (S.extbank || []); }
 function extFlashArr() { return splitOn() ? contentByKind('flash') : (S.extflash || []); }
 function extNotesArr() { return splitOn() ? contentByKind('notes') : (S.extnotes || []); }
+function extOutlineArr() { return splitOn() ? contentByKind('outline') : (S.extoutlines || []); }
 function contentByKind(kind) {
   const out = [];
   for (const pid of Object.keys(CONTENT.packs)) {
@@ -252,7 +256,7 @@ function upsertPack(pid, kind, name, items) {
   CONTENT.packs[pid] = { kind, name: name || (old && old.name) || pid, rev: changed ? Date.now() : old.rev, items: merged };
   return changed;
 }
-/* 舊資料遷移：S 裡的 extbank/extflash/extnotes 搬進內容層（跨裝置 merge 進來的舊包也走這裡） */
+/* 舊資料遷移：S 裡的 extbank/extflash/extnotes/extoutlines 搬進內容層（跨裝置 merge 進來的舊包也走這裡） */
 async function migrateContentFromS() {
   let moved = false; const changedPids = [];
   const doPack = (pid, kind, nm, items) => { if (upsertPack(pid, kind, nm, items)) changedPids.push(pid); moved = true; };
@@ -263,12 +267,13 @@ async function migrateContentFromS() {
   }
   if (Array.isArray(S.extflash) && S.extflash.length) doPack('legacy-flash', 'flash', '匯入公式卡', S.extflash);
   if (Array.isArray(S.extnotes) && S.extnotes.length) doPack('legacy-notes', 'notes', '匯入重點', S.extnotes);
+  if (Array.isArray(S.extoutlines) && S.extoutlines.length) doPack('legacy-outline', 'outline', '十一單元大綱', S.extoutlines);
   if (moved) {
     if (changedPids.length) { // 先確認新副本真的落地，再刪舊的——否則 IDB 不可用又 localStorage 配額滿時會兩頭皆空
       const durable = await persistContent();
       if (!durable) { try { alert('這台裝置存不下匯入的內容（空間不足或隱私模式），已保留在原位置不清除、避免遺失。請釋放空間或換裝置後再登入。'); } catch (e) {} return moved; }
     }
-    delete S.extbank; delete S.extflash; delete S.extnotes;
+    delete S.extbank; delete S.extflash; delete S.extnotes; delete S.extoutlines;
     save(); // S 瘦身上雲（此時內容已在本機內容層 durable）
     for (const pid of changedPids) pushPack(pid); // 只在內容真的變了才重傳
   }
@@ -457,11 +462,30 @@ function importData(input) {
   r.onload = async () => {
     try {
       const d = JSON.parse(r.result);
-      // 內容信封 v2：{kind:'qpack'|'flash'|'notes', name, items:[…]}
+      // 內容信封 v2：{kind:'qpack'|'flash'|'notes'|'outline', name, items:[…]}
       if (d && d.kind && !Array.isArray(d.items)) { alert(`內容包格式不對：items 必須是陣列（kind=${escH(String(d.kind))}）。`); return; }
       if (d && d.kind && Array.isArray(d.items)) {
         if (d.kind === 'qpack') { importQPack(d.items, d.name); return; }
-        if (d.kind === 'flash' || d.kind === 'notes') {
+        if (d.kind === 'flash' || d.kind === 'notes' || d.kind === 'outline') {
+          if (d.kind === 'outline') {
+            const ok = d.items.filter((x) => x && /^outline-(?:[1-9]|1[01])$/.test(String(x.id || ''))
+              && typeof x.title === 'string' && x.title.trim() && typeof x.reference === 'string' && x.reference.trim());
+            if (ok.length !== 11) { alert('大綱包必須剛好包含 outline-1 到 outline-11，且每份都有 title 與 reference。'); return; }
+            if (!confirm(`十一單元大綱包${d.name ? '「' + d.name + '」' : ''}已完整辨識。匯入後 AI 會以它作為私人對照答案，確定？`)) return;
+            let st, spid = null;
+            if (splitOn()) {
+              spid = 'teacher-outline-11';
+              upsertPack(spid, 'outline', d.name || '十一單元大綱', ok);
+              st = unionById.last || {};
+            } else {
+              S.extoutlines = unionById(ok, S.extoutlines);
+              st = unionById.last || {};
+              if (!save()) { alert('本機儲存空間已滿，大綱沒有存下來。'); return; }
+            }
+            alert(`完成：十一張大綱新增 ${st.added || 0}、更新 ${st.updated || 0}。內容只存你的私人內容層，不會寫入公開題庫。`);
+            if (spid) { pushPack(spid); reloadAfterContent(); } else location.reload();
+            return;
+          }
           const isF = d.kind === 'flash';
           const ok = d.items.filter((x) => isF ? (x && x.id && x.front && x.back && TOPICS[x.unit]) : (x && x.id && TOPICS[x.topic] && x.title && x.html));
           if (!ok.length) { alert(isF ? '這包公式卡格式不對（每張需 id/unit/front/back）。' : '這包重點整理格式不對（每條需 id/topic/title/html）。'); return; }
@@ -480,7 +504,7 @@ function importData(input) {
           if (spid) { pushPack(spid); reloadAfterContent(); } else location.reload();
           return;
         }
-        alert(`不認得的內容包 kind：「${d.kind}」（支援 qpack / flash / notes）。`);
+        alert(`不認得的內容包 kind：「${d.kind}」（支援 qpack / flash / notes / outline）。`);
         return;
       }
       if (d && Array.isArray(d.extbank) && !Array.isArray(d.attempts)) {
@@ -506,7 +530,7 @@ function importData(input) {
       if (content) {
         for (const pid of Object.keys(content)) {
           const p = content[pid]; if (!p || !Array.isArray(p.items)) continue;
-          const f = p.kind === 'flash' ? 'extflash' : p.kind === 'notes' ? 'extnotes' : 'extbank';
+          const f = p.kind === 'flash' ? 'extflash' : p.kind === 'notes' ? 'extnotes' : p.kind === 'outline' ? 'extoutlines' : 'extbank';
           d[f] = unionById(p.items, d[f]);
         }
       }
@@ -518,7 +542,7 @@ function importData(input) {
 }
 function backupCard() {
   return `<div class="card"><h2>💾 資料備份與匯入</h2>
-    <p class="dim">雲端同步就是主備份；這裡是額外的離線副本。「匯入」也吃<b>題包／重點包／公式卡包</b>（qpack / notes / flash 格式的 .json）。</p>
+    <p class="dim">雲端同步是主備份；這裡是額外的離線副本。「匯入」也接受私人題包與十一單元大綱包（qpack / outline 格式的 .json）。</p>
     <div class="actr"><button class="btn" onclick="exportData()">匯出備份（.json）</button>
     <button class="btn" onclick="$('#impfile').click()">匯入備份 / 內容包</button>
     <button class="btn" onclick="exportInk()">匯出今日筆跡</button></div>
@@ -1216,7 +1240,7 @@ function aiCredentialCleanup() {
 function aiCard() {
   if (!supa) return `<div class="card"><h2>AI 批改</h2><p class="dim">這個環境無法連到安全的 OpenAI 代理；本機作答與自評仍可正常使用。</p></div>`;
   if (!syncState.user) return `<div class="card"><h2>AI 批改</h2>
-    <p class="dim">OpenAI 已改由伺服器端安全代理提供。請先在下方登入雲端同步，AI 批改、提示與 AI 老師才會啟用。</p></div>`;
+    <p class="dim">OpenAI 已由伺服器端安全代理提供。登入雲端同步後，手寫大綱比對、觀念語意檢查與模考手寫批改才會啟用。</p></div>`;
   return `<div class="card"><h2>AI 批改</h2>
     <p class="dim">使用 OpenAI Responses API；金鑰只保存在 Supabase Edge Function，不會送到瀏覽器、localStorage、備份或 app_state。</p>
     <p id="aitest-msg" class="dim"></p>
@@ -1755,6 +1779,31 @@ const MOCK_SPEC = {
   ],
 };
 
+/* 老師指定的 11 單元名稱會由使用者稍後提供的十一份大綱建立私人內容包。
+   在內容包進來前先保留固定的十一張空白頁，避免我們擅自猜書本合併方式。 */
+const OUTLINE_DEFAULTS = Array.from({ length: 11 }, (_, i) => ({
+  id: `outline-${i + 1}`,
+  title: `第 ${i + 1} 單元（等待大綱照片）`,
+  reference: '',
+}));
+
+/* 定義卡只存數學概念本身，不要求逐字背誦。reference 是 AI 判斷語意是否完整的準繩，
+   prompt 則刻意要求「自己的話＋例子／反例」，避免只背課本句子。 */
+const CONCEPT_CARDS = [
+  { id: 'concept-function', unit: 'num', title: '函數', prompt: '不用背課本句子：什麼情況才叫函數？請用自己的話說，並舉一個「不是函數」的例子。', reference: '函數是從定義域每一個輸入，恰好指定到一個輸出的對應。不同輸入可以有相同輸出，但同一輸入不能同時對到兩個不同輸出。' },
+  { id: 'concept-necessary-sufficient', unit: 'num', title: '充分條件與必要條件', prompt: '用自己的話解釋「P 是 Q 的充分條件」和「P 是 Q 的必要條件」，最好各給一例。', reference: 'P 充分於 Q 表示 P 發生就保證 Q 發生，即 P 推出 Q；P 必要於 Q 表示 Q 要成立不能缺 P，即 Q 推出 P。兩個方向不可混用。' },
+  { id: 'concept-absolute', unit: 'num', title: '絕對值', prompt: '絕對值真正代表什麼？為什麼 |x-a| 可以拿來描述一段區間？', reference: '絕對值代表數線上的距離，所以永遠非負。|x-a| 是 x 與 a 的距離；限制它小於某數是在限制 x 落在以 a 為中心的一段範圍。' },
+  { id: 'concept-log', unit: 'exp', title: '對數', prompt: '不要只寫公式：log_a b 到底在問什麼？底數與真數為什麼有限制？', reference: 'log_a b 是「a 的幾次方等於 b」的指數。實數範圍要有 a>0、a≠1、b>0，因為正底數的實數次方為正，底數 1 又無法用指數區分結果。' },
+  { id: 'concept-sequence', unit: 'seq', title: '數列與遞迴', prompt: '數列是什麼？遞迴式提供了什麼資訊，又還缺什麼才真正決定整個數列？', reference: '數列可視為以正整數索引的函數。遞迴式描述相鄰或先前各項如何產生下一項，通常還需要足夠的初始值才能唯一決定整個數列。' },
+  { id: 'concept-conditional', unit: 'prob', title: '條件機率', prompt: '用自己的話說明 P(A|B) 的分母為什麼變成 P(B)，它和 P(A∩B) 差在哪裡。', reference: '已知 B 發生後，樣本空間縮小為 B；其中同時屬於 A 的部分是 A∩B，所以 P(A|B)=P(A∩B)/P(B)，前提是 P(B)>0。' },
+  { id: 'concept-independent', unit: 'prob', title: '獨立事件', prompt: '兩事件「獨立」真正表示什麼？它和「互斥」為什麼不是同一件事？', reference: '獨立表示知道其中一事件是否發生，不改變另一事件的機率，等價於 P(A∩B)=P(A)P(B)。互斥表示不能同時發生；兩個機率皆正的互斥事件反而不獨立。' },
+  { id: 'concept-expectation', unit: 'prob', title: '期望值', prompt: '期望值為什麼不是「最可能出現的值」？請用長期重複試驗的角度解釋。', reference: '期望值是各可能值以其機率加權的平均，代表大量重複試驗時平均結果趨近的中心，不必是任何一次能取到的值，也不一定是機率最大的值。' },
+  { id: 'concept-sd', unit: 'data', title: '標準差', prompt: '標準差在量什麼？全部資料同加一個常數、或同乘一個常數時會怎麼變？為什麼？', reference: '標準差量資料相對平均數的典型散布程度。全部同加常數只平移所以不變；同乘 c，距平均數的差也乘 c，因此標準差乘 |c|。' },
+  { id: 'concept-dot', unit: 'vec', title: '向量內積', prompt: '內積的幾何意義是什麼？為什麼能用它判斷夾角、垂直與投影？', reference: '內積 a·b=|a||b|cosθ，衡量兩向量同方向成分的程度。內積為零（且向量非零）代表垂直；除以一向量長度可得到另一向量在該方向的純量投影。' },
+  { id: 'concept-normal', unit: 'splane', title: '法向量', prompt: '法向量和直線／平面是什麼關係？為什麼方程式的係數會直接給法向量？', reference: '法向量是與直線（平面中）或平面（空間中）垂直的非零向量。方程式中變數係數形成的向量，與同一圖形上任兩點的方向向量內積為零，因此是法向量。' },
+  { id: 'concept-matrix', unit: 'mat', title: '矩陣與線性變換', prompt: '矩陣除了「一排數字」之外代表什麼？矩陣乘法的先後順序為什麼通常不能交換？', reference: '矩陣可表示把向量送到另一向量的線性變換；每一欄可看成基底向量變換後的位置。矩陣相乘代表依序做變換，先後順序改變通常會得到不同結果，所以通常不可交換。' },
+];
+
 /* ═══════════ 工具 ═══════════ */
 const $ = (sel) => document.querySelector(sel);
 const app = () => $('#app');
@@ -1958,6 +2007,38 @@ function pendingCorrections() {
 function dueCorrections() {
   return pendingCorrections().filter((batch) => String(batch.due || '') <= today());
 }
+function outlineUnits() {
+  const byId = new Map(OUTLINE_DEFAULTS.map((x) => [x.id, { ...x }]));
+  for (const x of extOutlineArr()) {
+    if (!x || !byId.has(x.id)) continue;
+    byId.set(x.id, { ...byId.get(x.id), ...x });
+  }
+  return OUTLINE_DEFAULTS.map((x) => byId.get(x.id));
+}
+function outlineLast(unitId) {
+  return (S.outlineAttempts || []).filter((x) => x.unitId === unitId)
+    .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0))[0] || null;
+}
+function outlineDueUnits() {
+  return outlineUnits().filter((unit) => {
+    if (!unit.reference) return false;
+    const last = outlineLast(unit.id);
+    return !last || String(last.due || '') <= today();
+  });
+}
+function conceptLast(conceptId) {
+  return (S.conceptAttempts || []).filter((x) => x.conceptId === conceptId)
+    .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0))[0] || null;
+}
+function conceptDueCards() {
+  return CONCEPT_CARDS.filter((card) => {
+    const last = conceptLast(card.id);
+    return !last || String(last.due || '') <= today();
+  });
+}
+function visionDueEntries() {
+  return (S.visionQueue || []).filter((x) => !x.done && x.stage === 'waiting' && String(x.due || '') <= today());
+}
 function severeWeakTopics() {
   const recent = (S.attempts || []).filter((a) => a.mode === 'mixed' || a.mode === 'mock').slice(-60);
   const by = {};
@@ -1977,6 +2058,14 @@ function nextBestAction() {
   if (dueN) return {
     kind: 'correction', title: `先完成 ${dueN} 題隔日盲訂正`, why: '今天只看最終答案，重新找方向；先留下自己的嘗試，仍無收穫才解鎖詳解。', time: `約 ${Math.max(10, dueN * 5)} 分鐘`, onclick: "nav('correct')", button: '開始訂正',
   };
+  const outlineDue = outlineDueUnits();
+  if (outlineDue.length) return {
+    kind: 'outline', title: `重測 ${outlineDue[0].title}`, why: `上次默寫已滿兩天。先從空白頁把子標題與內容重新叫回來，再對照大綱。`, time: '約 15 分鐘', onclick: `startOutlineRecall('${outlineDue[0].id}')`, button: '開始空白默寫',
+  };
+  const visionDue = visionDueEntries();
+  if (visionDue.length) return {
+    kind: 'vision', title: `再給第 ${visionDue[0].examNo || '—'} 題一次機會`, why: '昨天想不到方向的題，今天再只看題目找一次切入點；仍沒有方向才看詳解。', time: '約 5 分鐘', onclick: `startVisionScan('${visionDue[0].id}')`, button: '第二天再想',
+  };
   const cal = mockCalibration();
   if (!cal.count) return {
     kind: 'mock', title: '建立一回全真基準', why: '用正式的 20 題、100 分鐘完成一整回；今天只批分，明天才訂正。', time: '100 分鐘', onclick: "nav('mock')", button: '查看模考說明',
@@ -1988,7 +2077,9 @@ function nextBestAction() {
   if (severe) {
     return { kind: 'topic', title: `「${TOPICS[severe.k]}」需要短期補洞`, why: `混合／模考近 ${severe.n} 題只答對 ${severe.ok} 題，已達到才例外分章介入的門檻。`, time: '約 20 分鐘', onclick: `startTopicIntervention('${severe.k}')`, button: '補洞 6 題' };
   }
-  return { kind: 'mixed', title: '完成一輪全範圍混合題', why: '不顯示章節，不預告解法；讓你練習從題目本身辨認方向。', time: '約 25 分鐘', onclick: 'startMixedPractice(8)', button: '開始 8 題' };
+  const concept = conceptDueCards()[0];
+  if (concept) return { kind: 'concept', title: `用自己的話說明「${concept.title}」`, why: '不背字句；說清楚真正意思、限制與一個例子，AI 再檢查語意缺口。', time: '約 5 分鐘', onclick: `startConceptCheck('${concept.id}')`, button: '開始說明' };
+  return { kind: 'vision', title: '只用眼睛刷一題', why: '不計算，只寫出一個可行的破題方向；卡住的題保留到明天再想。', time: '約 5 分鐘', onclick: 'startVisionScan()', button: '開始找方向' };
 }
 function nextActionCard() {
   const a = nextBestAction();
@@ -2637,21 +2728,17 @@ function homeInsights() {
 /* ═══════════ 導覽 ═══════════ */
 const VIEWS = {
   home:    { label: '今日', icon: 'clipboard', fn: renderHome },
-  prac:    { label: '混合練習', icon: 'target', fn: renderPracConfig },
-  mock:    { label: '全真模考', icon: 'clock', fn: renderMockIntro },
+  outline: { label: '大綱默寫', icon: 'pencil', fn: renderOutlineRecall },
+  mock:    { label: '模考與破題', icon: 'target', fn: renderMockIntro },
   correct: { label: '隔日訂正', icon: 'book', fn: renderCorrections },
-  stats:   { label: '分析', icon: 'chart', fn: renderStats },
+  concept: { label: '觀念理解', icon: 'brain', fn: renderConcepts },
 };
-// 舊工具仍保留在「分析」內供需要時使用，但不再擠在主導覽、也不主導每天的訓練順序。
+// 主導覽只保留老師新版流程；stats 僅供同步燈開啟新版進度與帳號設定。
 const LEGACY_VIEWS = {
-  phone: { label: '手機練習', icon: 'phone', fn: renderPhone },
-  drill: { label: '速度工具', icon: 'bolt', fn: renderDrillMenu },
-  wrong: { label: '舊錯題庫', icon: 'book', fn: renderWrong },
-  tutor: { label: 'AI 老師', icon: 'tutor', fn: renderTutor },
-  plan: { label: '舊作戰計畫', icon: 'calendar', fn: renderPlan },
+  stats: { label: '進度與設定', icon: 'chart', fn: renderStats },
 };
 let sessionActive = false;
-let sessionMode = null; // 'prac' | 'review' | 'mock' | 'correction' | 'drill'
+let sessionMode = null; // 'prac' | 'review' | 'mock' | 'correction' | 'outline' | 'vision' | 'concept' | 'drill'
 let sessSnap = null;    // 進場快照，用於「不保留紀錄」離開時復原
 function snapSession() { sessSnap = { att: S.attempts.length, wrong: JSON.stringify(S.wrong), drills: JSON.stringify(S.drills || {}), daily: JSON.stringify(S.daily || {}) }; }
 function rollbackSession() {
@@ -2676,13 +2763,16 @@ function endSession() {
   mnq = null; // 口訣快答同理
   wflash = null; // 衝刺複習中途離開即作廢（無紀錄可丟）
   qsess = null; // 讓遲到的 AI 批改回呼認得出「這一題已經結束了」
+  outlineSess = null;
+  conceptSess = null;
+  vision = null;
   sessionChrome(false);
   modalClose();
 }
 /* 中途退出：讓飼主自己選「已作答的要不要留紀錄」，不預設丟掉 */
 function exitFlow(view) {
   // 誤觸離開後回到出發的入口頁，不要一律丟回首頁（想馬上重來一輪不用重新導航）
-  const backTo = { drill: 'stats', phone: 'stats', wflash: 'correct', prac: 'prac', review: 'correct', correction: 'correct' };
+  const backTo = { drill: 'stats', phone: 'stats', wflash: 'correct', prac: 'prac', review: 'correct', correction: 'correct', outline: 'outline', concept: 'concept', vision: 'mock' };
   const goto = view || backTo[sessionMode] || 'home';
   if (!sessionActive) { nav(goto); return; }
   // 開著確認框的時間不算作答時間：按「繼續」時把計時起點往後平移
@@ -2723,6 +2813,25 @@ function exitFlow(view) {
     modal('<h2>要暫停隔日訂正嗎？</h2><p>已完成與已留下的嘗試都會保留；目前這張尚未送出的手寫不會算一次努力紀錄。</p>', [
       ['繼續訂正', resume, 'primary'],
       ['保留進度，離開', () => { endSession(); correction = null; nav(goto); }],
+    ]);
+    return;
+  }
+  if (sessionMode === 'outline' || sessionMode === 'concept') {
+    const label = sessionMode === 'outline' ? '這張空白默寫' : '這張觀念自述';
+    modal(`<h2>要離開嗎？</h2><p>${label}尚未送出；離開會捨棄目前未送出的內容。</p>`, [
+      ['繼續', resume, 'primary'],
+      ['捨棄未送出內容，離開', () => { endSession(); nav(goto); }],
+    ]);
+    return;
+  }
+  if (sessionMode === 'vision') {
+    modal('<h2>要暫停這題嗎？</h2><p>尚未完成的方向不算一次訓練；已送出的第一天紀錄仍會保留。</p>', [
+      ['繼續', resume, 'primary'],
+      ['暫停並離開', () => {
+        if (vision && vision.entry && !(vision.entry.attempts || []).length) S.visionQueue = (S.visionQueue || []).filter((x) => x.id !== vision.entry.id);
+        else if (vision && vision.entry && !vision.entry.done) { vision.entry.stage = 'waiting'; vision.entry.due = today(); vision.entry.mt = Date.now(); }
+        save(); endSession(); nav(goto);
+      }],
     ]);
     return;
   }
@@ -2785,28 +2894,201 @@ function nav(view) {
 function updateBadge() {
   const n = dueCorrections().reduce((sum, batch) => sum + batch.entries.filter((x) => !x.done).length, 0);
   const b = $('nav button[data-view="correct"]');
-  if (b) b.innerHTML = `${uiIcon('book')}<span>隔日訂正</span>` + (n ? ` <span class="badge">${n}</span>` : '');
+  if (b) b.innerHTML = `${uiIcon('book')}<span>${VIEWS.correct.label}</span>` + (n ? ` <span class="badge">${n}</span>` : '');
 }
 
 /* ═══════════ 首頁：老師新版流程 ═══════════ */
 function renderHome() {
   const days = Math.ceil((new Date(EXAM_DATE) - new Date()) / 86400000);
+  const outlineReady = outlineUnits().filter((x) => x.reference).length;
+  const outlineDue = outlineDueUnits().length;
+  const visionDue = visionDueEntries().length;
+  const conceptDue = conceptDueCards().length;
   app().innerHTML = `
   <div class="hero">
     <h1>數A特訓 <span class="dim" style="font-size:12px">${APP_VER}</span></h1>
-    <p>距離 116 學測還有 <b class="accent">${days} 天</b>｜預設混合練習，不用章節名稱提示方向</p>
+    <p>距離 116 學測還有 <b class="accent">${days} 天</b>｜主練破題方向，不用速度製造假進度</p>
   </div>
   ${nextActionCard()}
-  ${todayCard()}
-  ${scoreGoalCard()}
+  <div class="task-strip">
+    <button onclick="nav('outline')"><span>大綱默寫</span><b>${outlineReady ? `${outlineDue} 份到期` : '等待 11 份大綱'}</b></button>
+    <button onclick="nav('mock')"><span>模考與破題</span><b>${visionDue ? `${visionDue} 題第二天` : '找一個切入點'}</b></button>
+    <button onclick="nav('concept')"><span>觀念理解</span><b>${conceptDue} 張待說明</b></button>
+  </div>
   <div class="card"><h2>現在的訓練規則</h2>
     <ol>
-      <li>平日只做全範圍混合題，先從題目辨認方法。</li>
-      <li>只有混合／模考連續顯示某章嚴重斷裂，才短期開 6 題專項補洞。</li>
-      <li>模考完全比照正式試卷：20 題、100 分鐘；當天只批分，不訂正。</li>
-      <li>隔天只看最終答案重想方向；留下努力紀錄後仍無收穫，才解鎖詳解並重算。</li>
+      <li>十一單元從空白默寫子標題與內容；對答案後隔兩天再測。</li>
+      <li>平時只做混合題。只有數據確認某章嚴重斷裂，才短期分章補洞。</li>
+      <li>全真模考固定 20 題、100 分鐘；當天只批分，隔天才訂正。</li>
+      <li>訂正每題分三級：直接會寫、只看答案能算出、必須看詳解。</li>
+      <li>眼睛刷題只找破題方向、不計算；沒方向的題隔天再想一次，仍沒有才看詳解。</li>
+      <li>基本定義用自己的話說清楚意思、限制與例子，不背逐字句子。</li>
     </ol>
-  </div>`;
+  </div>
+  <div class="quiet-link"><button class="btn sm" onclick="nav('stats')">進度、同步與設定</button></div>`;
+}
+
+/* ═══════════ 任務一：十一單元空白默寫 ═══════════ */
+let outlineSess = null;
+function renderOutlineRecall() {
+  const units = outlineUnits();
+  const ready = units.filter((x) => x.reference).length;
+  const tiles = units.map((unit, i) => {
+    const last = outlineLast(unit.id);
+    const due = unit.reference && (!last || String(last.due || '') <= today());
+    const state = !unit.reference ? '等待大綱' : !last ? '尚未測' : due ? '今天重測' : `下次 ${last.due}`;
+    const score = last && Number.isFinite(Number(last.coverage)) ? `${last.coverage}%` : '空白頁';
+    return `<button class="recall-tile${due ? ' due' : ''}" onclick="startOutlineRecall('${unit.id}')">
+      <span class="recall-no">${String(i + 1).padStart(2, '0')}</span><strong>${escH(unit.title)}</strong>
+      <span>${escH(state)}</span><b>${score}</b></button>`;
+  }).join('');
+  app().innerHTML = `<div class="hero compact"><h1>十一單元大綱默寫</h1>
+    <p>看章節名稱，把想得到的子標題、定義、公式與彼此關係全部寫出來。寫完才看正確大綱；每次完成後隔兩天重測。</p></div>
+    ${ready < 11 ? `<div class="card notice"><b>目前已建立 ${ready} / 11 份私人對照大綱。</b><p>十一張空白頁已可先寫；你把老師給的十一份大綱拍給我後，我會辨識標題與內容、人工複核，再匯入私人內容層。未匯入前 AI 不會假裝知道正確答案。</p></div>` : ''}
+    <div class="recall-grid">${tiles}</div>
+    <details class="card"><summary>這個任務怎麼做</summary><ol><li>只看最上方單元名稱，先努力默寫。</li><li>送出後 AI 依語意對照大綱，不要求逐字相同。</li><li>當場看完整正確大綱，理解漏掉的結構。</li><li>系統固定排在兩天後重測，不因一次高分取消。</li></ol></details>`;
+}
+function startOutlineRecall(unitId) {
+  const unit = outlineUnits().find((x) => x.id === unitId);
+  if (!unit) return;
+  outlineSess = { unit, t0: Date.now(), inkId: `outline:${unit.id}:${Date.now()}` };
+  sessionActive = true; sessionMode = 'outline';
+  renderOutlineSheet();
+}
+function renderOutlineSheet() {
+  const unit = outlineSess.unit;
+  app().innerHTML = `<div class="session-head"><span>大綱默寫｜${escH(unit.title)}</span>
+    <button class="btn sm xbtn" onclick="exitFlow()" title="離開">✕</button></div>
+    <div class="card qcard booklet sheet recall-sheet">
+      <div class="recall-paper-head"><span>單元名稱</span><h1>${escH(unit.title)}</h1><p>不要先看答案。默寫子標題、重要內容、公式與它們的關係。</p></div>
+      <div class="sheet-tools"><b>整張空白處都能寫</b>${inkToolsHTML()}</div>
+      <div class="write-pad"></div>
+      <div class="ansarea recall-submit">
+        <details><summary>補一段可搜尋的文字摘要（選用）</summary><textarea id="outline-typed" rows="3" placeholder="例如：我記得這單元先分成……"></textarea></details>
+        <button class="btn primary big" id="outline-submit" onclick="finishOutlineRecall()">寫完，對照大綱</button>
+        <p id="outline-msg" class="dim"></p>
+      </div>
+      <canvas id="ink-cv" class="qink"></canvas>
+    </div>`;
+  sessionChrome(true); scrollQuestionTop();
+  inkStart(outlineSess.inkId, outlineSess.t0);
+}
+async function outlineGradeCall(unit, calcB64, typed) {
+  const content = [];
+  if (calcB64) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: calcB64 } });
+  content.push({ type: 'text', text: `你是學測數A複習教練。請比較學生從空白默寫的內容與老師的大綱。判斷概念語意，不要求逐字相同，也不要因字醜扣分；看不清的地方不要猜。
+單元：${unit.title}
+老師大綱：\n${unit.reference}
+學生另附文字摘要：${typed || '無'}
+請回報實際覆蓋到的重點、漏掉的重點、明顯不精確之處，以及下一次只需優先記住的一個結構。coverage 是老師大綱核心點的語意覆蓋百分比。` });
+  return aiJSON(content, 'outline');
+}
+async function finishOutlineRecall() {
+  if (!outlineSess) return;
+  const sess = outlineSess, typed = (($('#outline-typed') || {}).value || '').trim();
+  const img = inkCaptureFull(sess.inkId);
+  const proc = inkStop();
+  if (!(proc && proc.n) && typed.length < 10) {
+    alert('這張還是空白的。先努力寫出你記得的子標題或內容，再對答案。');
+    inkStart(sess.inkId, sess.t0, sess.t0);
+    return;
+  }
+  syncInk(sess.inkId, sess.t0, Object.assign({ mode: 'outline', unitId: sess.unit.id }, proc || {}));
+  const btn = $('#outline-submit'), msg = $('#outline-msg');
+  if (btn) btn.disabled = true;
+  if (msg) msg.textContent = sess.unit.reference ? (aiEnabled() ? 'AI 正在依大綱逐點比對…' : '未登入，這次先保存並顯示正確大綱。') : '這份對照大綱尚未匯入，先保存這次默寫。';
+  let grade = null, error = '';
+  if (sess.unit.reference && aiEnabled()) {
+    try { grade = await outlineGradeCall(sess.unit, img, typed); }
+    catch (e) { error = (e && e.message) || String(e); }
+  }
+  if (outlineSess !== sess) return;
+  const attempt = {
+    id: `outline-attempt-${Date.now()}`, unitId: sess.unit.id, title: sess.unit.title,
+    d: today(), ts: Date.now(), due: sess.unit.reference ? addDays(today(), 2) : null,
+    coverage: grade && Number.isFinite(Number(grade.coverage)) ? Number(grade.coverage) : null,
+    grade, typed: typed.slice(0, 1000), strokes: proc ? proc.n || 0 : 0, aiError: error || null,
+  };
+  S.outlineAttempts = S.outlineAttempts || []; S.outlineAttempts.push(attempt); save();
+  sessionActive = false; sessionMode = null; sessionChrome(false); outlineSess = null;
+  renderOutlineResult(sess.unit, attempt);
+}
+function outlineList(items, empty) {
+  return Array.isArray(items) && items.length ? `<ul>${items.map((x) => `<li>${escH(x)}</li>`).join('')}</ul>` : `<p class="dim">${empty}</p>`;
+}
+function renderOutlineResult(unit, attempt) {
+  const g = attempt.grade;
+  app().innerHTML = `<h1>${escH(unit.title)}｜本次對照</h1>
+    ${!unit.reference ? `<div class="card notice"><h2>這次已保存，但還不能可靠判對</h2><p>這份老師大綱尚未匯入。等你提供照片後，這一頁會有完整正確答案與 AI 語意比對。</p></div>` : ''}
+    ${unit.reference ? `<div class="result-score"><span>大綱語意覆蓋</span><b>${g ? `${g.coverage}%` : '未取得 AI 判讀'}</b><small>不要求逐字相同；固定兩天後再測</small></div>` : ''}
+    ${g ? `<div class="feedback-grid">
+      <section class="card"><h2>已寫到</h2>${outlineList(g.covered, '尚未辨識到明確覆蓋點')}</section>
+      <section class="card"><h2>這次漏掉</h2>${outlineList(g.missing, '沒有明顯漏項')}</section>
+      <section class="card"><h2>需要修正</h2>${outlineList(g.inaccurate, '沒有明顯錯誤')}</section>
+      <section class="card"><h2>兩天後先想這個</h2><p>${escH(g.nextFocus || '先想整體架構，再補細節。')}</p></section>
+    </div>` : attempt.aiError ? `<div class="card warn"><p>AI 比對暫時失敗：${escH(attempt.aiError)}。默寫與重測日期仍已保存。</p></div>` : ''}
+    ${unit.reference ? `<details class="card answer-outline" open><summary>老師的完整正確大綱</summary><div>${escH(unit.reference)}</div></details>
+      <div class="card good"><b>下次重測：${attempt.due}</b><p>到期時仍從空白頁開始，不先看這份答案。</p></div>` : ''}
+    <div class="actr"><button class="btn" onclick="nav('outline')">回十一單元</button><button class="btn primary" onclick="nav('home')">回今日</button></div>`;
+}
+
+/* ═══════════ 任務三：重要定義用自己的話說 ═══════════ */
+let conceptSess = null;
+function renderConcepts() {
+  const cards = CONCEPT_CARDS.map((card) => {
+    const last = conceptLast(card.id), due = !last || String(last.due || '') <= today();
+    const status = !last ? '尚未說明' : due ? '今天複述' : `下次 ${last.due}`;
+    const understood = last && last.understood;
+    return `<button class="concept-tile${due ? ' due' : ''}" onclick="startConceptCheck('${card.id}')"><span>${escH(TOPICS[card.unit] || '')}</span><strong>${escH(card.title)}</strong><small>${status}</small>${last ? `<b>${understood ? '意思完整' : '仍有缺口'}</b>` : ''}</button>`;
+  }).join('');
+  app().innerHTML = `<div class="hero compact"><h1>重要觀念的真正意思</h1><p>不背課本字句。請用自己的話說明「它是什麼、限制在哪裡、能排除哪個常見誤解」，最好再給一個例子或反例。</p></div>
+    <div class="concept-grid">${cards}</div>
+    <div class="card"><h2>判定標準</h2><p>AI 只檢查語意是否準確完整，不會因為你沒照標準定義逐字背而扣分。理解仍有缺口的卡兩天後再說；已說清楚的卡七天後再確認。</p></div>`;
+}
+function startConceptCheck(conceptId) {
+  const card = CONCEPT_CARDS.find((x) => x.id === conceptId); if (!card) return;
+  conceptSess = { card, t0: Date.now() };
+  sessionActive = true; sessionMode = 'concept';
+  app().innerHTML = `<div class="session-head"><span>觀念理解｜${escH(card.title)}</span><button class="btn sm xbtn" onclick="exitFlow()" title="離開">✕</button></div>
+    <div class="card concept-prompt"><span class="eyebrow">${escH(TOPICS[card.unit] || '')}</span><h1>${escH(card.title)}</h1><p>${escH(card.prompt)}</p>
+      <label>用自己的話說<textarea id="concept-answer" rows="8" autofocus placeholder="我認為它真正的意思是……；例如……；它和……不同，因為……"></textarea></label>
+      <p id="concept-msg" class="dim"></p><div class="actr"><button class="btn primary big" id="concept-submit" onclick="finishConceptCheck()">送出語意檢查</button></div></div>`;
+  sessionChrome(true); scrollQuestionTop();
+}
+async function conceptGradeCall(card, answer) {
+  return aiJSON([{ type: 'text', text: `你是嚴謹的學測數A概念教練。學生必須真正理解定義，但不必逐字背誦。請比較他的自述與參考語意，判斷是否能用自己的話準確說明；不要因措辭不同扣分。
+概念：${card.title}
+提問：${card.prompt}
+參考語意：${card.reference}
+學生自述：${answer}
+understood 只有在核心意思與限制都沒有實質誤解時才為 true；clearerVersion 用學生聽得懂的口吻補成更完整版本；nextPrompt 給下一次可自問的一個問題。` }], 'concept');
+}
+async function finishConceptCheck() {
+  if (!conceptSess) return;
+  const sess = conceptSess, answer = (($('#concept-answer') || {}).value || '').trim();
+  if (answer.length < 18) { alert('再多說一點：至少要讓人看得出「它是什麼」以及一個限制、例子或反例。'); return; }
+  const btn = $('#concept-submit'), msg = $('#concept-msg'); if (btn) btn.disabled = true;
+  if (msg) msg.textContent = aiEnabled() ? 'AI 正在檢查語意，不比對逐字句子…' : '未登入，這次先保存並顯示參考語意。';
+  let grade = null, error = '';
+  if (aiEnabled()) { try { grade = await conceptGradeCall(sess.card, answer); } catch (e) { error = (e && e.message) || String(e); } }
+  if (conceptSess !== sess) return;
+  const understood = !!(grade && grade.understood);
+  const attempt = { id: `concept-attempt-${Date.now()}`, conceptId: sess.card.id, d: today(), ts: Date.now(), answer: answer.slice(0, 1400),
+    understood, grade, due: addDays(today(), understood ? 7 : 2), aiError: error || null };
+  S.conceptAttempts = S.conceptAttempts || []; S.conceptAttempts.push(attempt); save();
+  sessionActive = false; sessionMode = null; sessionChrome(false); conceptSess = null;
+  renderConceptResult(sess.card, attempt);
+}
+function renderConceptResult(card, attempt) {
+  const g = attempt.grade;
+  app().innerHTML = `<h1>${escH(card.title)}｜語意檢查</h1>
+    <div class="result-score"><span>目前判定</span><b>${g ? (g.understood ? '已說清楚' : '仍有缺口') : '已保存'}</b><small>下次複述：${attempt.due}</small></div>
+    ${g ? `<div class="feedback-grid"><section class="card"><h2>你已理解</h2>${outlineList(g.accurate, '尚未辨識到完整重點')}</section>
+      <section class="card"><h2>還要補上</h2>${outlineList(g.missing, '沒有明顯缺漏')}</section>
+      <section class="card"><h2>需要修正的誤解</h2><p>${g.misconception ? escH(g.misconception) : '沒有明顯誤解'}</p></section>
+      <section class="card"><h2>下一次自問</h2><p>${escH(g.nextPrompt || '')}</p></section></div>
+      <div class="card answer-outline"><h2>把你的說法補完整</h2><p>${escH(g.clearerVersion || card.reference)}</p></div>` : `<div class="card answer-outline"><h2>參考語意</h2><p>${escH(card.reference)}</p>${attempt.aiError ? `<p class="warnc">AI 檢查暫時失敗：${escH(attempt.aiError)}</p>` : ''}</div>`}
+    <div class="actr"><button class="btn" onclick="nav('concept')">回觀念卡</button><button class="btn primary" onclick="nav('home')">回今日</button></div>`;
 }
 
 /* ═══════════ 速度特訓 ═══════════ */
@@ -4371,14 +4653,134 @@ function qRedoDone() {
 /* ═══════════ 模擬實戰 ═══════════ */
 function renderMockIntro() {
   const n = S.mocks.length;
+  const due = visionDueEntries();
+  const waiting = (S.visionQueue || []).filter((x) => !x.done && x.stage === 'waiting' && String(x.due || '') > today());
   app().innerHTML = `
-    <h1>全真模考</h1>
-    <div class="card">
+    <div class="hero compact"><h1>模考與破題</h1><p>同一批混合題，分成兩種完全不同的訓練：完整模考建立真實成績；眼睛刷題只練從題目找到第一個切入點。</p></div>
+    ${due.length ? `<div class="card next-action"><div><span class="eyebrow">第二天到期</span><h2>${due.length} 題昨天沒有方向</h2><p>今天再看一次題目。仍無方向，才開詳解。</p></div><button class="btn primary" onclick="startVisionScan('${due[0].id}')">再想一次</button></div>` : ''}
+    <div class="training-choice">
+    <section class="card choice-card"><span class="eyebrow">完整一回</span><h2>全真模考</h2>
       <p><b>20 題、100 分鐘、滿分 100 分</b>｜6 單選、6 多選、5 選填、3 題混合／非選擇。</p>
-      <p>作答中不顯示對錯或單題建議時間。交卷當天只批分與列出錯題號，不開答案、不訂正；隔天才進入只看最終答案的盲訂正。</p>
+      <p>作答中不顯示對錯或單題速度。交卷當天只批分與列錯題號，隔天才看最終答案訂正。</p>
       <p class="dim">目前題庫最後 3 題先以三題非選擇題近似正式結構。你拍完整紙本模考後，會再保留原頁面、題幹與真正題組關係匯入。已完成 ${n} 次模考。</p>
       <div class="actr"><button class="btn primary big" onclick="startMock()">開始一整回（100:00）</button></div>
+    </section>
+    <section class="card choice-card"><span class="eyebrow">不計算</span><h2>用眼睛刷題</h2>
+      <p>只讀題、寫出一個破題方向，接著對照詳解判斷這條路是否成立。不要展開計算。</p>
+      <p>一眼就知道怎麼做且很可能作對，可直接略過；完全沒方向則留下所屬單元／觀念，隔天再給它一次機會。</p>
+      <p class="dim">等待明天 ${waiting.length} 題｜今天到期 ${due.length} 題</p>
+      <div class="actr"><button class="btn primary big" onclick="startVisionScan()">看一題，只找方向</button></div>
+    </section></div>`;
+}
+
+/* ═══════════ 用眼睛刷題：第一天無方向就圈起來，第二天才可看詳解 ═══════════ */
+let vision = null;
+function visionTopicOptions(selected) {
+  return `<option value="">選一個可能單元</option>${Object.keys(TOPICS).map((k) => `<option value="${k}"${selected === k ? ' selected' : ''}>${escH(TOPICS[k])}</option>`).join('')}`;
+}
+function visionPickQuestion() {
+  const blocked = new Set((S.visionQueue || []).filter((x) => !x.done).map((x) => x.qid));
+  const recent = new Set((S.visionHistory || []).slice(-60).map((x) => x.qid));
+  let pool = BANK.filter((q) => !blocked.has(q.id) && !recent.has(q.id) && !(q.src && packIsOff(q.src)));
+  if (!pool.length) pool = BANK.filter((q) => !blocked.has(q.id) && !(q.src && packIsOff(q.src)));
+  if (!pool.length) return null;
+  const ac = attCountMap();
+  return shuffle(pool).sort((a, b) => (ac.get(a.id) || 0) - (ac.get(b.id) || 0) || Number(b.diff || 0) - Number(a.diff || 0))[0];
+}
+function startVisionScan(entryId) {
+  if (!syncGate()) return;
+  let entry = entryId && (S.visionQueue || []).find((x) => x.id === entryId && !x.done);
+  if (entry && entry.stage === 'waiting' && String(entry.due || '') > today()) { alert(`這題要到 ${entry.due} 再想；先讓腦袋真正隔一天。`); return; }
+  if (!entry) {
+    const q = visionPickQuestion(); if (!q) { alert('目前找不到新的混合題。'); return; }
+    const ts = Date.now();
+    entry = { id: `vision-${ts}`, qid: q.id, examNo: q.no || null, d: today(), ts, mt: ts, due: null, stage: 'new', attempts: [], done: false };
+    S.visionQueue = S.visionQueue || []; S.visionQueue.push(entry); save();
+  }
+  const q = bankById(entry.qid); if (!q) { entry.done = true; save(); renderMockIntro(); return; }
+  vision = { entry, q };
+  sessionActive = true; sessionMode = 'vision';
+  renderVisionWork();
+}
+function visionQuestionHTML(q) {
+  return `<div class="eye-question"><div class="bk-head"><span class="bk-exam">數學Ａ</span><span class="bk-sect">混合辨識</span></div>
+    <div class="bk-item"><span class="bk-num">※</span><div class="bk-content">${q.stem ? `<div class="bk-stem">${rtTxt(q.stem)}</div>` : ''}${rtTxt(q.q)}${q.fig ? `<div class="qfig">${sanitizeSVG(q.fig)}</div>` : ''}${q.opts ? `<div class="eye-options">${q.opts.map((o, i) => `<p>(${i + 1}) ${rtTxt(o)}</p>`).join('')}</div>` : ''}</div></div></div>`;
+}
+function renderVisionWork() {
+  const { entry, q } = vision;
+  const prior = (entry.attempts || []).map((a, i) => `<li>第 ${i + 1} 天：${a.direction ? escH(a.direction) : `沒有方向；猜 ${escH(TOPICS[a.topic] || '未選單元')}${a.concept ? `／${escH(a.concept)}` : ''}`}</li>`).join('');
+  const second = (entry.attempts || []).length > 0;
+  app().innerHTML = `<div class="session-head"><span>眼睛刷題｜${second ? '第二天再想' : '第一眼找方向'}</span><button class="btn sm xbtn" onclick="exitFlow()" title="離開">✕</button></div>
+    <div class="vision-rule"><b>今天不計算。</b>目標只有一個：說出第一步為什麼值得做，以及下一步想得到什麼。</div>
+    ${visionQuestionHTML(q)}
+    <div class="card direction-form">
+      ${prior ? `<details open><summary>上次留下的紀錄</summary><ol>${prior}</ol></details>` : ''}
+      <label><b>我想到的破題方向</b><textarea id="vision-direction" rows="4" placeholder="例如：先把條件改寫成向量內積，因為題目在問垂直；接著用內積為 0 建式。"></textarea></label>
+      <label>可能還有另一條路（選填）<textarea id="vision-alt" rows="2" placeholder="這不是目前主要目標，有想到再記。"></textarea></label>
+      <div class="fallback-fields"><label>如果真的沒方向，至少猜所屬單元<select id="vision-topic">${visionTopicOptions('')}</select></label>
+      <label>可能卡在哪個觀念<input id="vision-concept" type="text" placeholder="例如：條件機率的分母"></label></div>
+      <p id="vision-msg" class="dim"></p>
+      <div class="actr"><button class="btn primary big" onclick="visionSubmit(true)">我有一個方向，對照詳解</button>
+      <button class="btn" onclick="visionSubmit(false)">${second ? '第二天仍沒有方向，開詳解' : '完全沒方向，圈到明天'}</button>
+      ${second ? '' : '<button class="btn subtle" onclick="visionKnown()">一眼就會且很可能作對，略過</button>'}</div>
     </div>`;
+  sessionChrome(true); scrollQuestionTop();
+}
+function visionReadForm() {
+  return {
+    direction: (($('#vision-direction') || {}).value || '').trim(),
+    alternate: (($('#vision-alt') || {}).value || '').trim(),
+    topic: (($('#vision-topic') || {}).value || '').trim(),
+    concept: (($('#vision-concept') || {}).value || '').trim(),
+  };
+}
+function visionSubmit(hasDirection) {
+  if (!vision) return;
+  const data = visionReadForm(), entry = vision.entry, priorN = (entry.attempts || []).length;
+  if (hasDirection && data.direction.length < 8) { alert('請把方向寫得再具體一點：至少包含「先做什麼」以及「為什麼／想得到什麼」。'); return; }
+  if (!hasDirection && !data.topic && data.concept.length < 2) { alert('即使沒有方向，也要先猜一個所屬單元，或寫下你覺得卡住的觀念。'); return; }
+  entry.attempts = entry.attempts || [];
+  entry.attempts.push({ d: today(), ts: Date.now(), hasDirection: !!hasDirection, ...data });
+  entry.mt = Date.now();
+  if (!hasDirection && priorN === 0) {
+    entry.stage = 'waiting'; entry.due = addDays(today(), 1); save();
+    sessionActive = false; sessionMode = null; sessionChrome(false); vision = null;
+    app().innerHTML = `<h1>已把這題圈到明天</h1><div class="card waiting-card"><b>詳解仍鎖住</b><p>你已留下「${escH(TOPICS[data.topic] || data.concept)}」這個初步辨認。<b>${entry.due}</b> 再看同一題一次；到時仍沒有方向，才開詳解。</p>
+      <div class="actr"><button class="btn" onclick="nav('mock')">回模考與破題</button><button class="btn primary" onclick="nav('home')">回今日</button></div></div>`;
+    return;
+  }
+  entry.stage = 'compare'; entry.solutionUnlockedAt = Date.now(); save();
+  renderVisionCompare(hasDirection);
+}
+function renderVisionCompare(hadDirection) {
+  const { entry, q } = vision;
+  const last = entry.attempts[entry.attempts.length - 1];
+  app().innerHTML = `<div class="session-head"><span>方向對照｜${hadDirection ? '檢查這條路' : '第二天後開詳解'}</span><button class="btn sm xbtn" onclick="exitFlow()" title="離開">✕</button></div>
+    ${visionQuestionHTML(q)}
+    <div class="card your-direction"><span class="eyebrow">你先留下的內容</span><p>${last.direction ? escH(last.direction) : `沒有方向；猜測 ${escH(TOPICS[last.topic] || '')}${last.concept ? `／${escH(last.concept)}` : ''}`}</p>${last.alternate ? `<p class="dim">另一條路：${escH(last.alternate)}</p>` : ''}</div>
+    <div class="card solution-compare"><span class="eyebrow">現在才看的詳解</span><div>${rtTxt(q.sol || '這題目前沒有詳解。')}</div>${q.solFig ? `<div class="qfig">${sanitizeSVG(q.solFig)}</div>` : ''}${q.tip ? `<p class="tip">${rtTxt(q.tip)}</p>` : ''}</div>
+    <div class="card"><h2>對照後，這個方向怎麼樣？</h2>
+      <label>從詳解多學到的另一個方向（選填）<textarea id="vision-learned" rows="2" placeholder="只記值得帶走的切入點，不抄整篇詳解。"></textarea></label>
+      <div class="actr">${hadDirection ? '<button class="btn primary" onclick="visionFinish(\'works\')">原方向成立</button><button class="btn" onclick="visionFinish(\'different\')">詳解有更好的方向</button><button class="btn" onclick="visionFinish(\'fails\')">原方向不成立</button>' : '<button class="btn primary" onclick="visionFinish(\'solution\')">已看懂詳解的切入點</button>'}</div></div>`;
+  sessionChrome(true); scrollQuestionTop();
+}
+function visionFinish(outcome) {
+  if (!vision) return;
+  const { entry, q } = vision, learned = (($('#vision-learned') || {}).value || '').trim();
+  entry.done = true; entry.stage = 'done'; entry.outcome = outcome; entry.learned = learned.slice(0, 500); entry.completedAt = Date.now(); entry.mt = Date.now();
+  S.visionHistory = S.visionHistory || [];
+  S.visionHistory.push({ id: `vision-result-${entry.id}`, qid: q.id, d: today(), ts: Date.now(), outcome, days: (entry.attempts || []).length, attempts: entry.attempts, learned: entry.learned });
+  save(); sessionActive = false; sessionMode = null; sessionChrome(false); vision = null;
+  app().innerHTML = `<h1>這題的方向紀錄完成</h1><div class="card good"><p class="big">${outcome === 'works' ? '你的第一條路成立。' : outcome === 'different' ? '你找到一條路，也從詳解多收一條。' : outcome === 'fails' ? '你已辨認原方向為什麼走不通。' : '這題確實用了兩天，現在才收下詳解的切入點。'}</p>
+    <p>今天的成果不是算出數字，而是讓「看到題目後先去哪裡」變得更容易被叫出來。</p><div class="actr"><button class="btn" onclick="nav('mock')">回入口</button><button class="btn primary" onclick="startVisionScan()">再看一題</button></div></div>`;
+}
+function visionKnown() {
+  if (!vision) return;
+  const { entry, q } = vision;
+  entry.done = true; entry.stage = 'done'; entry.outcome = 'obvious'; entry.completedAt = Date.now(); entry.mt = Date.now();
+  S.visionHistory = S.visionHistory || []; S.visionHistory.push({ id: `vision-obvious-${Date.now()}`, qid: q.id, d: today(), ts: Date.now(), outcome: 'obvious', days: 0 });
+  save(); sessionActive = false; sessionMode = null; sessionChrome(false); vision = null;
+  app().innerHTML = `<h1>已略過明顯會寫的題</h1><div class="card"><p>沒有花時間展開計算，符合老師目前的優先順序。</p><div class="actr"><button class="btn" onclick="nav('mock')">回入口</button><button class="btn primary" onclick="startVisionScan()">再看一題</button></div></div>`;
 }
 let mock = null;
 function buildPaper() {
@@ -4648,12 +5050,13 @@ function mockAnswerResult(q, a) {
   return { ok, yourAns, points: Math.round(points * 100) / 100 };
 }
 function queueMockCorrection(detail, mockTs) {
-  const entries = detail.filter((x) => !x.ok).map((x) => ({
+  const entries = detail.map((x) => ({
     qid: x.q.id, examNo: x.q.examNo, examSection: x.q.examSection, points: x.q.points,
-    yourAns: x.yourAns, answered: x.answered, done: false, attempts: 0, logs: [],
-    solutionUnlockedAt: null, completedAt: null,
+    yourAns: x.yourAns, answered: x.answered, correctOnExam: !!x.ok,
+    done: !!x.ok, level: x.ok ? 1 : null, outcome: x.ok ? 'direct' : null,
+    attempts: 0, logs: [], solutionUnlockedAt: null,
+    completedAt: x.ok ? mockTs : null,
   }));
-  if (!entries.length) return null;
   const batch = { id: `mock-${mockTs}`, d: today(), due: addDays(today(), 1), mockTs, mt: mockTs, name: '系統全真模考', entries };
   S.corrections = S.corrections || [];
   S.corrections.push(batch);
@@ -4699,7 +5102,7 @@ function mockFinal() {
       ${mockTrend}
       <p>錯題號：<b>${wrongNos.length ? wrongNos.join('、') : '無'}</b>${unansweredNos.length ? `｜未作答：${unansweredNos.join('、')}` : ''}</p>
       <div class="tblwrap"><table class="tbl"><tr><th>題號</th><th>判定</th><th>得分</th></tr>${rows}</table></div>
-      ${batch ? `<div class="warn"><b>今天到此為止，不訂正。</b>答案、章節與詳解都不在這頁顯示。這 ${batch.entries.length} 題已鎖到 <b>${batch.due}</b>，明天進「隔日訂正」只看最終答案重新想方向。</div>` : ''}
+      ${batch ? `<div class="warn"><b>今天到此為止，不訂正。</b>答案、章節與詳解都不在這頁顯示。答對的 ${okN} 題已列為「第一級：我會寫」；其餘 ${wrongNos.length} 題鎖到 <b>${batch.due}</b>，明天只看最終答案重新想方向。</div>` : ''}
       ${mock.partial ? '<p class="dim">中途結束不建立隔日訂正批次；完整 20 題交卷才納入新版模考走勢。</p>' : '<p class="dim">多選題依錯選項數給部分分數；非選擇題目前以人工／AI 對錯判定給該小題全分或零分。</p>'}
       <div class="actr"><button class="btn" onclick="nav('stats')">看模考走勢</button><button class="btn primary" onclick="nav('home')">回今日</button></div>
     </div>`;
@@ -4713,24 +5116,37 @@ function finalAnswerHTML(q) {
   if (!q) return '題目已不在目前題庫';
   return q.type === 'fill' ? mDispOpt(String(q.ans[0])) : q.ans.map((a) => `(${a + 1})`).join('');
 }
+function correctionLevel(entry) {
+  return Number(entry && entry.level) || (entry && entry.outcome === 'direct' ? 1 : entry && entry.outcome === 'answer-only' ? 2 : entry && entry.outcome === 'solution' ? 3 : null);
+}
+function correctionCounts(batch) {
+  const out = { open: 0, l1: 0, l2: 0, l3: 0 };
+  for (const entry of (batch && batch.entries) || []) {
+    const level = correctionLevel(entry);
+    if (!entry.done) out.open++;
+    else if (level) out[`l${level}`]++;
+  }
+  return out;
+}
 function renderCorrections() {
-  const pending = pendingCorrections().slice().sort((a, b) => String(a.due).localeCompare(String(b.due)));
-  const due = pending.filter((b) => String(b.due || '') <= today());
+  const all = (S.corrections || []).slice().sort((a, b) => Number(b.mockTs || 0) - Number(a.mockTs || 0));
+  const pending = all.filter((batch) => (batch.entries || []).some((x) => !x.done));
+  const due = pending.filter((b) => String(b.due || '') <= today()).sort((a, b) => String(a.due).localeCompare(String(b.due)));
   const waiting = pending.filter((b) => String(b.due || '') > today());
   const dueCards = due.map((batch) => {
-    const open = batch.entries.filter((x) => !x.done).length;
-    const solvedBlind = batch.entries.filter((x) => x.done && x.outcome === 'answer-only').length;
-    const usedSol = batch.entries.filter((x) => x.done && x.outcome === 'solution').length;
+    const c = correctionCounts(batch);
     return `<div class="card"><h2>${escH(batch.name || '全真模考')}｜${batch.d}</h2>
-      <p>尚待訂正 <b>${open}</b> 題｜只看答案想通 ${solvedBlind} 題｜最後使用詳解 ${usedSol} 題</p>
-      <div class="actr"><button class="btn primary" onclick="startCorrection('${jsA(batch.id)}')">${open ? '繼續盲訂正' : '已完成'}</button></div></div>`;
+      <p>尚待訂正 <b>${c.open}</b> 題｜第一級 ${c.l1}｜第二級 ${c.l2}｜第三級 ${c.l3}</p>
+      <div class="actr"><button class="btn primary" onclick="startCorrection('${jsA(batch.id)}')">繼續盲訂正</button><button class="btn" onclick="renderTeacherReport('${jsA(batch.id)}')">給老師看這一回</button></div></div>`;
   }).join('');
-  const waitingCards = waiting.map((batch) => `<div class="card"><h2>${escH(batch.name || '全真模考')}｜${batch.d}</h2>
-    <p>錯題 ${batch.entries.filter((x) => !x.done).length} 題。<b>答案與詳解鎖到 ${batch.due}</b>，今天不訂正。</p></div>`).join('');
+  const waitingCards = waiting.map((batch) => { const c = correctionCounts(batch); return `<div class="card"><h2>${escH(batch.name || '全真模考')}｜${batch.d}</h2>
+    <p>第一級 ${c.l1} 題；其餘 ${c.open} 題的<b>答案與詳解鎖到 ${batch.due}</b>，今天不訂正。</p><div class="actr"><button class="btn" onclick="renderTeacherReport('${jsA(batch.id)}')">查看目前紀錄</button></div></div>`; }).join('');
+  const completed = all.filter((batch) => (batch.entries || []).length && (batch.entries || []).every((x) => x.done)).slice(0, 6);
+  const completedCards = completed.map((batch) => { const c = correctionCounts(batch); return `<div class="report-row"><span>${batch.d}</span><b>第一級 ${c.l1}｜第二級 ${c.l2}｜第三級 ${c.l3}</b><button class="btn sm" onclick="renderTeacherReport('${jsA(batch.id)}')">老師檢視</button></div>`; }).join('');
   app().innerHTML = `<h1>隔日訂正</h1>
-    ${dueCards || '<div class="card"><p>今天沒有到期的盲訂正。</p><div class="actr"><button class="btn primary" onclick="nav(\'prac\')">做混合練習</button></div></div>'}
+    ${dueCards || '<div class="card"><p>今天沒有到期的盲訂正。</p><div class="actr"><button class="btn primary" onclick="nav(\'mock\')">去找一題破題方向</button></div></div>'}
     ${waitingCards ? `<h2>尚未到期</h2>${waitingCards}` : ''}
-    <details class="card"><summary class="dim">舊版錯題與其他工具</summary><p>舊資料仍完整保留，但不再主導每天流程。</p><div class="actr"><button class="btn sm" onclick="nav('wrong')">舊錯題庫</button><button class="btn sm" onclick="nav('tutor')">AI 老師</button></div></details>`;
+    ${completedCards ? `<details class="card" open><summary>已完成的模考三級紀錄</summary><div class="report-list">${completedCards}</div></details>` : ''}`;
 }
 function startCorrection(batchId) {
   const batch = (S.corrections || []).find((b) => b.id === batchId);
@@ -4750,33 +5166,40 @@ function correctionNext() {
 function correctionEffort() {
   if (!correction) return null;
   const note = (($('#cor-direction') || {}).value || '').trim();
+  const alternate = (($('#cor-alt') || {}).value || '').trim();
+  const topic = (($('#cor-topic') || {}).value || '').trim();
+  const concept = (($('#cor-concept') || {}).value || '').trim();
   const t0 = correction.t0;
   const proc = inkStop();
-  if (!(proc && proc.n) && note.length < 6) {
-    alert('先在紙上重新算，或寫下至少一句你實際嘗試的方向；這個努力本身才是訓練。');
+  const hasDirection = note.length >= 8;
+  const hasUnitPoint = !!topic && concept.length >= 2;
+  if (!hasDirection && !hasUnitPoint) {
+    alert('請留下可給老師看的紀錄：寫出一個具體破題方向；若真的沒有方向，至少選所屬單元並寫出可能卡住的觀念。');
     const entry = correction.batch.entries[correction.indexes[correction.i]];
     const q = correctionQuestion(entry);
-    correction.t0 = Date.now();
-    inkStart(q.id, correction.t0);
+    inkStart(q.id, t0, t0);
     return null;
   }
   const entry = correction.batch.entries[correction.indexes[correction.i]];
   syncInk(entry.qid, t0, Object.assign({ mode: 'correction', correctionId: correction.batch.id }, proc || {}));
-  return { note, proc, ms: Date.now() - t0 };
+  return { note, alternate: alternate.slice(0, 500), topic, concept: concept.slice(0, 160), proc, ms: Date.now() - t0 };
 }
 function renderCorrectionWork() {
   const entry = correction.batch.entries[correction.indexes[correction.i]];
   const q = correctionQuestion(entry);
   if (!q) { entry.done = true; save(); correction.i++; return correctionNext(); }
   const unlocked = !!entry.solutionUnlockedAt;
-  const prior = (entry.logs || []).map((log, i) => `<li>第 ${i + 1} 次：${log.note ? escH(log.note) : `留下 ${log.strokes || 0} 筆手寫`}</li>`).join('');
+  const prior = (entry.logs || []).map((log, i) => `<li>第 ${i + 1} 次：${log.note ? escH(log.note) : `沒有方向；${escH(TOPICS[log.topic] || '')}${log.concept ? `／${escH(log.concept)}` : ''}`}${log.alternate ? `<span class="dim">（另一路：${escH(log.alternate)}）</span>` : ''}</li>`).join('');
   const actions = `<div class="blind-answer"><span class="eyebrow">本階段唯一可看的資料</span><p>最終答案：<b class="big">${finalAnswerHTML(q)}</b></p></div>
     ${prior ? `<details><summary class="dim">我前面已試過的方向</summary><ol>${prior}</ol></details>` : ''}
-    <label class="chip col" style="display:flex">我這次重新嘗試的方向（也可以直接寫在紙上）<textarea id="cor-direction" class="ans-input" rows="2" placeholder="例如：先把條件改寫成……，再試著找……"></textarea></label>
+    <div class="correction-fields"><label>我這次重新嘗試的破題方向<textarea id="cor-direction" rows="3" placeholder="例如：先把條件改寫成內積，因為題目在問垂直；再用內積為 0 建式。"></textarea></label>
+    <label>另一個可能方向（選填）<textarea id="cor-alt" rows="2" placeholder="現在先求至少一個；真的想到第二個再記。"></textarea></label>
+    <div class="fallback-fields"><label>如果沒有方向，至少判斷所屬單元<select id="cor-topic">${visionTopicOptions('')}</select></label>
+    <label>這題可能卡住的單元重點<input id="cor-concept" type="text" placeholder="例如：兩事件獨立的判定"></label></div></div>
     <div class="actr">
       ${unlocked
-        ? '<button class="btn primary big" onclick="correctionComplete(true)">看過詳解後，已重新算完</button>'
-        : '<button class="btn primary big" onclick="correctionComplete(false)">我自己重新想通並算完</button><button class="btn" onclick="correctionLogStuck()">這次仍沒有方向，記下嘗試</button>'}
+        ? '<button class="btn primary big" onclick="correctionComplete(true)">看過詳解並重算完，列為第三級</button>'
+        : '<button class="btn primary big" onclick="correctionComplete(false)">只看答案就算出，列為第二級</button><button class="btn" onclick="correctionLogStuck()">仍沒算出，先保存方向／單元判斷</button>'}
     </div>
     ${!unlocked && entry.attempts > 0 ? '<div class="actr"><button class="btn" onclick="correctionUnlock()">努力後仍無收穫，解鎖詳解並重算</button></div>' : ''}`;
   app().innerHTML = `<div class="session-head"><span>隔日盲訂正｜第 ${entry.examNo} 題｜${correction.i + 1} / ${correction.indexes.length}</span>
@@ -4792,7 +5215,7 @@ function correctionLogStuck() {
   const entry = correction.batch.entries[correction.indexes[correction.i]];
   entry.attempts = (entry.attempts || 0) + 1;
   entry.logs = entry.logs || [];
-  entry.logs.push({ ts: Date.now(), note: effort.note, strokes: effort.proc ? effort.proc.n || 0 : 0, ms: effort.ms });
+  entry.logs.push({ ts: Date.now(), note: effort.note, alternate: effort.alternate, topic: effort.topic, concept: effort.concept, strokes: effort.proc ? effort.proc.n || 0 : 0, ms: effort.ms });
   correction.batch.mt = Date.now();
   save();
   renderCorrectionWork();
@@ -4809,8 +5232,8 @@ function correctionComplete(usedSolution) {
   const entry = correction.batch.entries[correction.indexes[correction.i]];
   if (usedSolution && !entry.solutionUnlockedAt) return;
   entry.logs = entry.logs || [];
-  entry.logs.push({ ts: Date.now(), note: effort.note, strokes: effort.proc ? effort.proc.n || 0 : 0, ms: effort.ms, resolved: true });
-  entry.done = true; entry.completedAt = Date.now(); entry.outcome = usedSolution ? 'solution' : 'answer-only';
+  entry.logs.push({ ts: Date.now(), note: effort.note, alternate: effort.alternate, topic: effort.topic, concept: effort.concept, strokes: effort.proc ? effort.proc.n || 0 : 0, ms: effort.ms, resolved: true });
+  entry.done = true; entry.completedAt = Date.now(); entry.outcome = usedSolution ? 'solution' : 'answer-only'; entry.level = usedSolution ? 3 : 2;
   correction.batch.mt = Date.now();
   const q = correctionQuestion(entry);
   if (q) recordAttempt(q, true, effort.ms, null, 'correction', effort.proc, null, { skipWrong: true });
@@ -4823,11 +5246,30 @@ function correctionDone() {
   const batch = correction && correction.batch;
   correction = null;
   if (!batch) return renderCorrections();
-  const blind = batch.entries.filter((x) => x.done && x.outcome === 'answer-only').length;
-  const solution = batch.entries.filter((x) => x.done && x.outcome === 'solution').length;
-  app().innerHTML = `<h1>這回訂正完成</h1><div class="card good"><p class="big">只靠最終答案重新想通 <b>${blind}</b> 題｜努力後使用詳解 <b>${solution}</b> 題</p>
-    <p>這兩個數字會留在分析裡；重點不是把詳解看懂，而是逐漸提高「只看答案也能自己找回方向」的比例。</p>
-    <div class="actr"><button class="btn" onclick="nav('stats')">看分析</button><button class="btn primary" onclick="nav('prac')">回混合練習</button></div></div>`;
+  const c = correctionCounts(batch);
+  app().innerHTML = `<h1>這回訂正完成</h1><div class="card good"><p class="big">第一級 <b>${c.l1}</b> 題｜第二級 <b>${c.l2}</b> 題｜第三級 <b>${c.l3}</b> 題</p>
+    <p>第一級＝考場直接會寫；第二級＝只給最終答案就能自己算出；第三級＝努力重想後仍須看詳解。每題留下的方向與單元判斷都可交給老師檢視。</p>
+    <div class="actr"><button class="btn" onclick="renderTeacherReport('${jsA(batch.id)}')">給老師看這一回</button><button class="btn primary" onclick="nav('mock')">回模考與破題</button></div></div>`;
+}
+function renderTeacherReport(batchId) {
+  const batch = (S.corrections || []).find((x) => x.id === batchId); if (!batch) return renderCorrections();
+  const c = correctionCounts(batch);
+  const levelName = (level) => level === 1 ? '第一級｜我會寫' : level === 2 ? '第二級｜只看答案能算出' : level === 3 ? '第三級｜需要看詳解' : '尚未完成訂正';
+  const items = (batch.entries || []).map((entry) => {
+    const q = correctionQuestion(entry), level = correctionLevel(entry);
+    const logs = (entry.logs || []).map((log, i) => `<div class="teacher-attempt"><b>第 ${i + 1} 次重想</b>
+      ${log.note ? `<p>方向：${escH(log.note)}</p>` : '<p>方向：尚未找到</p>'}
+      ${log.topic || log.concept ? `<p>判斷：${escH(TOPICS[log.topic] || '未選單元')}${log.concept ? `／${escH(log.concept)}` : ''}</p>` : ''}
+      ${log.alternate ? `<p>另一方向：${escH(log.alternate)}</p>` : ''}</div>`).join('');
+    return `<article class="teacher-q level-${level || 0}"><header><span>第 ${entry.examNo || '—'} 題</span><b>${levelName(level)}</b></header>
+      ${q ? `<div class="teacher-stem">${q.stem ? rtTxt(q.stem) : ''}${rtTxt(q.q)}</div>` : '<p class="dim">題目已不在目前題庫</p>'}
+      <p class="teacher-answer">模考作答：${escH(entry.yourAns || '（未作答）')}${entry.done && level > 1 && q ? `｜最終答案：${finalAnswerHTML(q)}` : ''}</p>
+      ${logs || (level === 1 ? '<p class="dim">考場當下直接答對，不需隔日重想。</p>' : '<p class="dim">尚未留下重想紀錄。</p>')}</article>`;
+  }).join('');
+  app().innerHTML = `<div class="report-head"><div><span class="eyebrow">老師檢視版</span><h1>${escH(batch.name || '全真模考')}｜${batch.d}</h1><p>第一級 ${c.l1}｜第二級 ${c.l2}｜第三級 ${c.l3}｜尚未完成 ${c.open}</p></div>
+    <div class="actr"><button class="btn" onclick="window.print()">列印／存成 PDF</button><button class="btn primary" onclick="nav('correct')">回隔日訂正</button></div></div>
+    <div class="teacher-report">${items}</div>`;
+  typesetIn(app()); scrollQuestionTop();
 }
 /* 手動把題目釘進錯題本（模擬放棄題等「沒作答但該補」的題） */
 function addWrongManual(csv) {
@@ -5056,37 +5498,24 @@ function reviewNext() {
 
 /* ═══════════ 數據 ═══════════ */
 function renderStats() {
-  const mixed = (S.attempts || []).filter((a) => a.mode === 'mixed');
-  const mixedRecent = mixed.slice(-40);
-  const mixedAcc = mixedRecent.length ? mixedRecent.filter((a) => a.ok).length / mixedRecent.length : null;
-  const mocks = (S.mocks || []).slice(-8).reverse();
-  const mockRows = mocks.map((m) => `<tr><td>${escH(m.d || '')}</td><td>${m.score != null ? m.score : Math.round(Number(m.acc || 0) * 100)} / 100</td><td>${m.questionOk != null ? `${m.questionOk}/${m.questionN}` : '舊版紀錄'}</td></tr>`).join('');
   const entries = (S.corrections || []).flatMap((b) => b.entries || []);
   const done = entries.filter((x) => x.done);
-  const blind = done.filter((x) => x.outcome === 'answer-only').length;
-  const solution = done.filter((x) => x.outcome === 'solution').length;
-  const severe = severeWeakTopics();
-  app().innerHTML = `<h1>分析</h1>
-    <div class="card"><h2>混合練習</h2>
-      <p class="big">${mixedAcc == null ? '尚無新版混合題紀錄' : `近 ${mixedRecent.length} 題答對 <b>${Math.round(mixedAcc * 100)}%</b>`}</p>
-      <p class="dim">這裡不把速度當主要成績，也不直接換算級分；用途是確認你能否在沒有章節提示時辨認方向。</p>
+  const levels = { l1: done.filter((x) => correctionLevel(x) === 1).length, l2: done.filter((x) => correctionLevel(x) === 2).length, l3: done.filter((x) => correctionLevel(x) === 3).length };
+  const visionDone = (S.visionHistory || []).filter((x) => x.outcome !== 'obvious');
+  const visionFirst = visionDone.filter((x) => Number(x.days || 0) === 1 && ['works', 'different', 'fails'].includes(x.outcome)).length;
+  const visionTwoDay = visionDone.filter((x) => Number(x.days || 0) >= 2).length;
+  const conceptsUnderstood = CONCEPT_CARDS.filter((x) => { const last = conceptLast(x.id); return last && last.understood; }).length;
+  const outlineReady = outlineUnits().filter((x) => x.reference).length;
+  app().innerHTML = `<div class="report-head"><div><span class="eyebrow">新版</span><h1>進度與設定</h1><p>只保留老師三大任務需要的資訊。</p></div><button class="btn" onclick="nav('home')">回今日</button></div>
+    <div class="new-progress-grid">
+      <section><span>大綱默寫</span><b>${(S.outlineAttempts || []).length}</b><small>次默寫｜對照大綱 ${outlineReady}/11</small></section>
+      <section><span>模考三級</span><b>${levels.l1} / ${levels.l2} / ${levels.l3}</b><small>第一級／第二級／第三級</small></section>
+      <section><span>破題方向</span><b>${visionFirst}</b><small>題第一天已有方向｜${visionTwoDay} 題用足兩天</small></section>
+      <section><span>觀念理解</span><b>${conceptsUnderstood}/${CONCEPT_CARDS.length}</b><small>張能用自己的話說清楚</small></section>
     </div>
-    <div class="card"><h2>全真模考走勢</h2>
-      ${mockRows ? `<div class="tblwrap"><table class="tbl"><tr><th>日期</th><th>得分</th><th>完全答對題數</th></tr>${mockRows}</table></div>` : '<p class="dim">尚未完成 20 題、100 分鐘的新版全真模考。</p>'}
-    </div>
-    <div class="card"><h2>隔日訂正品質</h2>
-      <p class="big">只看答案想通 <b>${blind}</b> 題｜最後使用詳解 <b>${solution}</b> 題</p>
-      <p class="dim">尚待完成 ${entries.filter((x) => !x.done).length} 題。目標是讓「只看最終答案就能自己找回方向」的比例逐步上升。</p>
-    </div>
-    <div class="card"><h2>是否需要分章補洞</h2>
-      ${severe.length ? `<p>只有這些單元超過嚴重斷裂門檻：</p><div class="chips">${severe.map((x) => `<button class="chip" onclick="startTopicIntervention('${x.k}')">${TOPICS[x.k]}　${x.ok}/${x.n}</button>`).join('')}</div>` : '<p class="dim">目前沒有。維持混合練習，不因少量錯題就切回分章模式。</p>'}
-    </div>
-    ${scoreGoalCard()}
-    <details class="card"><summary class="dim">工具、帳號與舊版資料</summary>
-      <p>這些功能仍保留，但不放在主要訓練動線。</p>
-      <div class="actr"><button class="btn sm" onclick="nav('phone')">零碎時間工具</button><button class="btn sm" onclick="nav('drill')">速度工具</button><button class="btn sm" onclick="nav('wrong')">舊錯題庫</button><button class="btn sm" onclick="nav('tutor')">AI 老師</button></div>
-      ${timerSettingCard()}${extMockCard()}${packCard()}${aiCard()}${syncCard()}${backupCard()}
-    </details>`;
+    ${syncCard()}
+    ${aiCard()}
+    ${backupCard()}`;
 }
 function renderLegacyStats() {
   if (!S.attempts.length) {
@@ -5590,7 +6019,7 @@ function syncPill() {
     const clean = uiTextOnly(message);
     el.className = className;
     el.title = clean;
-    el.setAttribute('aria-label', clean + '；前往數據與同步設定');
+    el.setAttribute('aria-label', clean + '；前往進度與設定');
     el.innerHTML = uiIcon('dot', 'sync-dot') + `<span class="sync-label">${escH(clean)}</span>`;
   };
   if (saveQuotaErr) { // 本機寫入失敗要看得見，不能無聲
@@ -5606,7 +6035,7 @@ function syncGate() {
   // 離線優先：右下角已永久顯示同步狀態，未登入不能再用 confirm 打斷每個訓練入口。
   if (!supa || syncState.user || syncGateAsked) return true;
   syncGateAsked = true;
-  syncState.msg = '未登入——本次紀錄只存這台；點此可到數據頁登入同步';
+  syncState.msg = '未登入——本次紀錄只存這台；點此可到進度與設定登入同步';
   try { syncPill(); } catch (_) {} // 啟動極早期或測試 DOM 尚未完整時也不阻擋開練
   return true;
 }
@@ -5714,10 +6143,30 @@ function mergeState(a, b) {
   const spset = new Set((a.sidePractice || []).map(spkey));
   const sidePractice = [...(a.sidePractice || [])];
   for (const x of b.sidePractice || []) if (!spset.has(spkey(x))) sidePractice.push(x);
-  const merged = { ...b, ...a, attempts, wrong, drills, mocks, corrections, extMocks, daily, extbank, sidePractice };
+  const unionRecords = (left, right, keyFn) => {
+    const out = [], keys = new Set();
+    for (const x of [...(left || []), ...(right || [])]) {
+      const k = keyFn(x);
+      if (!keys.has(k)) { keys.add(k); out.push(x); }
+    }
+    return out.sort((x, y) => Number(x.ts || x.mt || 0) - Number(y.ts || y.mt || 0));
+  };
+  const outlineAttempts = unionRecords(a.outlineAttempts, b.outlineAttempts, (x) => `${x.id || ''}|${x.ts || ''}|${x.unitId || ''}`);
+  const conceptAttempts = unionRecords(a.conceptAttempts, b.conceptAttempts, (x) => `${x.id || ''}|${x.ts || ''}|${x.conceptId || ''}`);
+  const visionHistory = unionRecords(a.visionHistory, b.visionHistory, (x) => `${x.id || ''}|${x.ts || ''}|${x.qid || ''}`);
+  const visionMap = new Map();
+  for (const x of [...(b.visionQueue || []), ...(a.visionQueue || [])]) {
+    if (!x || !x.id) continue;
+    const old = visionMap.get(x.id);
+    if (!old || Number(x.mt || x.ts || 0) >= Number(old.mt || old.ts || 0)) visionMap.set(x.id, x);
+  }
+  const visionQueue = [...visionMap.values()].sort((x, y) => Number(x.ts || 0) - Number(y.ts || 0));
+  const merged = { ...b, ...a, attempts, wrong, drills, mocks, corrections, extMocks, daily, extbank, sidePractice,
+    outlineAttempts, conceptAttempts, visionHistory, visionQueue };
   // 內容包（公式卡/重點整理）：兩裝置聯集、rev 大者勝
   if ((a.extflash || []).length || (b.extflash || []).length) merged.extflash = unionById(a.extflash, b.extflash);
   if ((a.extnotes || []).length || (b.extnotes || []).length) merged.extnotes = unionById(a.extnotes, b.extnotes);
+  if ((a.extoutlines || []).length || (b.extoutlines || []).length) merged.extoutlines = unionById(a.extoutlines, b.extoutlines);
   if (a.packOff || b.packOff) { // 逐 key 取時間戳較新的一方（舊格式 true 視為 ts=0）
     const norm = (v) => (v === true ? { off: true, ts: 0 } : v);
     const po = {};
