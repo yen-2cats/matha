@@ -328,7 +328,7 @@ Deno.serve(async (req: Request) => {
       )
     ) return reply(origin, 400, { message: "responseType 不合法" });
 
-    const model = Deno.env.get("OPENAI_MODEL") || "gpt-5.6";
+    const model = "gpt-5.5";
     const isTest = responseType === "test";
     const isStructured = ["grade", "process", "outline", "concept"].includes(
       responseType,

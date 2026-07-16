@@ -12,7 +12,7 @@
 ## Secrets
 
 - `OPENAI_API_KEY`：必要。OpenAI Project API key。
-- `OPENAI_MODEL`：選填，預設 `gpt-5.6`；OpenAI 目前實際回傳模型別名可能是 `gpt-5.6-sol`。
+- 模型固定在程式內的 `gpt-5.5`。所有 AI 功能共用這一個模型，不讀取模型環境變數，也不做自動升級、降級或模型分流。
 - `OPENAI_ALLOWED_EMAILS` 或 `OPENAI_ALLOWED_USER_IDS`：必要，至少設定一項。只有列入白名單的數A帳號能使用；多個值用逗號分隔。未設定時函式會拒絕服務，避免意外成為付費公開代理。
 - `OPENAI_ALLOWED_ORIGINS`：選填。程式已內建正式 GitHub Pages 與 `127.0.0.1:8899`、`localhost:8899`；只有新增其他網站來源時才需要設定。
 
