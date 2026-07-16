@@ -136,6 +136,7 @@ test('原版工作台把筆跡畫布直接覆蓋在題目與右側留白，不�
   assert.match(html, /paper-note-margin/);
   assert.match(html, /可直接書寫的題本頁/);
   assert.match(html, /id="paper-pen-width" type="range" min="35" max="200" step="5"/);
+  assert.match(html, /S Pen/);
   assert.match(html, /調整畫筆粗細/);
   assert.doesNotMatch(html, /paper-draft-pane|paper-view-switch/);
 });
@@ -159,6 +160,47 @@ test('原版模考每一筆保存當下粗細，調整後不會改變既有筆�
   assert.equal(result.selected, .45);
   assert.equal(result.saved, .45);
   assert.equal(result.label, '45%');
+});
+
+test('S Pen 側鍵暫時切換橡皮擦，懸停不誤刪且放開恢復原工具', () => {
+  const { run } = loadApp();
+  const result = plain(run(`(() => {
+    const active = { pen:false, erase:false }, status = { textContent:'' };
+    const button = (key) => ({ classList:{ toggle(name, value){ if (name === 'active') active[key] = value; } } });
+    const ctx = { setTransform(){}, clearRect(){}, beginPath(){}, moveTo(){}, lineTo(){}, stroke(){}, set strokeStyle(v){}, set lineCap(v){}, set lineJoin(v){}, set lineWidth(v){} };
+    const canvas = {
+      clientWidth:1000, clientHeight:1000, width:1000, height:1000, dataset:{},
+      setPointerCapture(){}, closest(){ return null; }, getContext(){ return ctx; },
+      getBoundingClientRect(){ return { left:0, top:0, width:1000, height:1000 }; },
+    };
+    document.querySelector = (selector) => selector === '#paper-ink-canvas' ? canvas
+      : selector === '#paper-tool-pen' ? button('pen')
+      : selector === '#paper-tool-erase' ? button('erase')
+      : selector === '#paper-ink-status' ? status : null;
+    const stroke = { pts:[[.5,.5,.5],[.51,.5,.5]] };
+    paperSourceSession = { inkMode:'pen', inkWidth:1, inkPages:{ 0:{ s:[stroke], loaded:true } }, page:0, run:{ id:'spen', createdAt:1 } };
+    const pen = (type, buttons, pressure) => ({ type, pointerType:'pen', pointerId:7, button:type === 'pointerdown' ? 2 : -1, buttons, pressure, clientX:500, clientY:500, currentTarget:canvas, preventDefault(){} });
+    const mapping = {
+      barrel:paperInkPenErasePressed({ pointerType:'pen', buttons:2 }),
+      barrelWithTip:paperInkPenErasePressed({ pointerType:'pen', buttons:3 }),
+      tail:paperInkPenErasePressed({ pointerType:'pen', buttons:32 }),
+      fallback:paperInkPenErasePressed({ type:'pointerdown', pointerType:'pen', button:2, buttons:0 }),
+      released:paperInkPenErasePressed({ type:'pointermove', pointerType:'pen', button:2, buttons:1 }),
+      mouse:paperInkPenErasePressed({ pointerType:'mouse', buttons:2 }),
+    };
+    paperInkDown(pen('pointerdown', 2, 0));
+    const hover = { deleted:!!stroke.dead, mode:canvas.dataset.mode, status:status.textContent };
+    paperInkMove(pen('pointermove', 3, .6));
+    const contact = { deleted:!!stroke.dead, mode:canvas.dataset.mode, status:status.textContent, active:{ ...active } };
+    paperInkUp(pen('pointerup', 0, 0));
+    const restored = { mode:canvas.dataset.mode, status:status.textContent, active:{ ...active } };
+    clearTimeout(paperInkSaveTimer); clearTimeout(paperInkCloudTimer);
+    return { mapping, hover, contact, restored };
+  })()`));
+  assert.deepEqual(result.mapping, { barrel:true, barrelWithTip:true, tail:true, fallback:true, released:false, mouse:false });
+  assert.deepEqual(result.hover, { deleted:false, mode:'erase', status:'S Pen 側鍵：暫時橡皮擦' });
+  assert.deepEqual(result.contact, { deleted:true, mode:'erase', status:'S Pen 側鍵：暫時橡皮擦', active:{ pen:false, erase:true } });
+  assert.deepEqual(result.restored, { mode:'pen', status:'筆跡自動保存', active:{ pen:true, erase:false } });
 });
 
 test('原版模考支援雙指以手勢中心縮放，放開一指後恢復單指拖曳', () => {
