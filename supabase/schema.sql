@@ -126,3 +126,25 @@ create policy "authenticated read matha content" on storage.objects
   for select
   to authenticated
   using (bucket_id = 'matha-content');
+
+-- ── 私有原版模考掃描：只由專案擁有者在 Dashboard 上傳 ──
+-- 掃描頁含使用者合法提供的紙本內容，因此不進公開 GitHub、不設 public bucket。
+-- 前端登入後只能讀取；沒有 insert/update/delete policy，學習帳號無法改寫題本。
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'matha-papers',
+  'matha-papers',
+  false,
+  8388608,
+  array['image/png', 'image/jpeg', 'image/webp']
+)
+on conflict (id) do update set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "authenticated read matha papers" on storage.objects;
+create policy "authenticated read matha papers" on storage.objects
+  for select
+  to authenticated
+  using (bucket_id = 'matha-papers');

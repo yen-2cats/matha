@@ -821,6 +821,28 @@ select:focus, textarea:focus, input:focus { outline: 2px solid rgba(117, 103, 92
 .choice-card { display: flex; flex-direction: column; min-height: 330px; }
 .choice-card h2 { font-size: 24px; font-weight: 580; }
 .choice-card .actr { margin-top: auto; }
+.paper-library { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--border); }
+.paper-library-head { display: grid; grid-template-columns: minmax(180px, .65fr) minmax(280px, 1.35fr); gap: 24px; align-items: end; margin-bottom: 12px; }
+.paper-library-head h2 { margin: 0; font-size: 24px; font-weight: 580; }
+.paper-library-head p { margin: 0; color: var(--dim); }
+.paper-source-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.paper-source-card { min-width: 0; min-height: 190px; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; gap: 16px; background: #f8f6f1; border: 1px solid var(--border); border-radius: var(--r-s); }
+.paper-source-card h3 { margin: 4px 0 9px; font-size: 19px; font-weight: 600; }
+.paper-source-card p { margin: 0 0 7px; color: var(--accent-deep); font-weight: 600; }
+.paper-source-card small { display: block; color: var(--dim); line-height: 1.5; }
+.paper-source-card .btn { width: 100%; }
+.paper-scan-stack { display: grid; gap: 18px; width: min(100%, 1180px); margin: 14px auto 110px; }
+.paper-scan { margin: 0; overflow: hidden; background: #e5e1da; border: 1px solid #c9c2b8; border-radius: 3px; box-shadow: var(--sh-1); }
+.paper-scan img { display: block; width: 100%; height: auto; background: #fff; }
+.paper-scan figcaption { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 11px; color: var(--dim); font-size: 12px; }
+.paper-scan figcaption a { color: var(--accent-deep); font-weight: 600; white-space: nowrap; }
+.paper-scan-stack.compact { gap: 10px; margin-bottom: 0; }
+.paper-submit-bar { position: sticky; left: 0; right: 0; bottom: 12px; z-index: 12; display: flex; align-items: center; justify-content: space-between; gap: 18px; width: min(100%, 920px); margin: -86px auto 16px; padding: 12px 14px 12px 18px; background: rgba(248, 246, 241, .96); border: 1px solid var(--border-strong); border-radius: var(--r-s); box-shadow: 0 8px 28px rgba(54, 48, 42, .16); backdrop-filter: blur(8px); }
+.paper-submit-bar span { color: var(--dim); }
+.paper-grade-fields { display: grid; gap: 13px; margin-top: 18px; }
+.paper-grade-fields label { display: grid; gap: 7px; font-size: 13px; font-weight: 600; }
+.paper-grade-fields input, .paper-grade-fields textarea { width: 100%; }
+.paper-key-wait .notice { margin-top: 13px; }
 .vision-rule { margin: 0 0 10px; padding: 10px 14px; background: #ece9e2; border-left: 3px solid #8d8175; color: var(--dim); }
 .vision-rule b { color: var(--text); }
 .vision-paper-progress { height: 4px; margin: 0 0 10px; overflow: hidden; background: #ddd8cf; }
@@ -866,7 +888,7 @@ select:focus, textarea:focus, input:focus { outline: 2px solid rgba(117, 103, 92
 .bank-health span { font-size: 13px; overflow-wrap: anywhere; }
 
 @media (max-width: 720px) {
-  .task-strip, .training-choice, .feedback-grid { grid-template-columns: 1fr; }
+  .task-strip, .training-choice, .feedback-grid, .paper-source-grid, .paper-library-head { grid-template-columns: 1fr; }
   .recall-grid, .concept-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .fallback-fields { grid-template-columns: 1fr; }
   .report-head { display: block; }
@@ -874,6 +896,11 @@ select:focus, textarea:focus, input:focus { outline: 2px solid rgba(117, 103, 92
   .report-row span { grid-column: 1 / -1; }
   .new-progress-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .bank-health { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .paper-library-head { gap: 8px; }
+  .paper-source-card { min-height: 0; }
+  .paper-scan-stack { gap: 12px; margin-bottom: 126px; }
+  .paper-submit-bar { bottom: 8px; margin-top: -110px; flex-direction: column; align-items: stretch; gap: 9px; padding: 12px; }
+  .paper-submit-bar .btn { width: 100%; }
 }
 @media (max-width: 440px) {
   .recall-grid, .concept-grid, .new-progress-grid, .vision-summary { grid-template-columns: 1fr; }

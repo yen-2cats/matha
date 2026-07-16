@@ -14,6 +14,14 @@ test('schema 提供 app_state revision CAS 與筆跡 client_id 冪等索引', ()
   assert.match(schema, /unique index if not exists ink_sessions_user_client[\s\S]*\(user_id, client_id\)/i);
 });
 
+test('原版模考 bucket 保持私有且登入者只有讀取權', () => {
+  const schema = fs.readFileSync(path.join(ROOT, 'supabase', 'schema.sql'), 'utf8');
+  const paperBlock = schema.slice(schema.indexOf("'matha-papers'"));
+  assert.match(paperBlock, /'matha-papers'[\s\S]*false[\s\S]*image\/png/);
+  assert.match(paperBlock, /create policy "authenticated read matha papers"[\s\S]*for select[\s\S]*to authenticated[\s\S]*bucket_id = 'matha-papers'/i);
+  assert.doesNotMatch(paperBlock, /create policy[^;]+(?:insert|update|delete)[^;]+matha-papers/is);
+});
+
 test('本機 IndexedDB 同時保存狀態與未上傳原始筆跡', () => {
   const source = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
   assert.match(source, /indexedDB\.open\('mathA13Content', 4\)/);

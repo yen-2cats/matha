@@ -2,9 +2,9 @@
 
 給學測數A考生使用的離線優先 PWA。它把十一單元空白默寫、全真模考、破題方向訓練、隔日三級訂正、重要定義理解、手寫 AI 比對與跨裝置同步放在同一個純前端 app 裡。
 
-目前版本為 `0717b`，正式站是 <https://uqrqmmw.github.io/matha/>。全站使用暖白、石墨字與低彩度灰褐／橄欖色；正式 UI 圖示由專案內建 SVG 提供，不使用 emoji。離線核心題庫有 363 題；登入後再載入 4092 題經清洗、雜湊驗證且不公開上 GitHub 的私有題庫，共 4455 題可用。
+目前版本為 `0717c`，正式站是 <https://uqrqmmw.github.io/matha/>。全站使用暖白、石墨字與低彩度灰褐／橄欖色；正式 UI 圖示由專案內建 SVG 提供，不使用 emoji。離線核心題庫有 363 題；登入後再載入 4092 題經清洗、雜湊驗證且不公開上 GitHub 的私有題庫，共 4455 題可用。
 
-主要流程只有五個入口：「今日、大綱默寫、模考與破題、隔日訂正、觀念理解」。完整模考固定 20 題、100 分鐘，當天只批分；隔天依「直接會寫／只看答案能算出／必須看詳解」分成三級。眼睛刷題同樣固定為一整回 20 題學測結構，只找切入點、不展開計算；完全沒方向的題鎖到隔天再想。舊速度工具、舊錯題庫與舊分析頁已從操作入口移除。完整設計與紙本整回匯入規格見 [`TEACHER_WORKFLOW_V2.md`](TEACHER_WORKFLOW_V2.md)。
+主要流程只有五個入口：「今日、大綱默寫、模考與破題、隔日訂正、觀念理解」。完整模考固定 20 題、100 分鐘，當天只批分；隔天依「直接會寫／只看答案能算出／必須看詳解」分成三級。眼睛刷題同樣固定為一整回 20 題學測結構，只找切入點、不展開計算；完全沒方向的題鎖到隔天再想。使用者提供的十一單元大綱已建立 11/11 語意核對基準；三回紙本模考以私有原版掃描載入，保留封面、說明與跨頁。舊速度工具、舊錯題庫與舊分析頁已從操作入口移除。完整設計與紙本整回匯入規格見 [`TEACHER_WORKFLOW_V2.md`](TEACHER_WORKFLOW_V2.md)。
 
 ## 快速開始
 
@@ -32,6 +32,7 @@ npm test
 - 固定公式核心變式的數量、單元分布、模板欄位與跨單元答案抽查
 - 十一單元固定空白頁、兩日重測、破題方向兩日鎖定與定義卡排程
 - 20 題／100 分正式模考結構、末三題共享題幹、多選部分給分、三級訂正與老師報告
+- 三回私有原版模考的封面／跨頁完整性、暫停續寫、隔日鎖定與只讀 Storage 規則
 - 分數、多根與座標答案判定
 - 台灣日界與日期加減
 - IndexedDB / localStorage 內容包與狀態合併，避免後備切換時丟資料
@@ -59,7 +60,7 @@ GitHub Actions 會在 push 與 pull request 自動執行同一套檢查。
 | `scripts/build-private-bank.js` | 把本機原始題庫清洗、分包並產生 SHA-256 manifest；輸出目錄不得進 Git |
 | `sw.js` | network-first + 離線 shell 快取 |
 | `vendor/` | 自架 KaTeX 與 Supabase browser client，正式站不依賴 CDN |
-| `supabase/schema.sql` | 帶 revision 的 `app_state`、冪等 `ink_sessions`、`teacher_methods`、`content_packs` 與 RLS |
+| `supabase/schema.sql` | 帶 revision 的 `app_state`、冪等 `ink_sessions`、`teacher_methods`、`content_packs`、私有原卷 bucket 與 RLS |
 | `supabase/functions/device-pair/` | 為已登入帳號簽發一次性短效 magic-link token，不傳遞帳密或 session 權杖 |
 | `tests/` | Node 內建 test runner 的回歸測試，沒有第三方依賴 |
 
@@ -75,6 +76,7 @@ GitHub Actions 會在 push 與 pull request 自動執行同一套檢查。
 - Supabase publishable key 可放前端；service-role key 絕對不可放前端。
 - OpenAI API key 只保存在 Supabase 專案 `rrihysbxhsbxjteqmtdu` 的 Edge Function Secret；瀏覽器、`app_state`、localStorage 與備份都不保存 Key。AI 代理會以同一專案的登入權杖驗證使用者，未登入請求回傳 401。
 - `matha-content` bucket 是私有且僅允許登入者讀取。4521 題原始來源中，4092 題通過清洗；300 題因缺圖、6 題超出數A範圍、123 題重複而隔離，不會默默混入練習。
+- `matha-papers` bucket 同樣是私有、只允許登入者讀取，保存使用者提供的原版模考掃描；掃描檔不提交公開 repo，也不進 PWA 離線 shell。
 - 配對連結只含一次性 magic-link token hash，有效一小時且使用後失效；不含密碼、access token 或 refresh token。舊版 base64 帳密與 session 配對格式不再接受。
 - 匯入題目文字一律走白名單清洗；SVG 走獨立 SVG 白名單。不要把外部字串直接塞進 `innerHTML`。
 

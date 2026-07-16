@@ -25,22 +25,24 @@ test('級分校準只採完整模擬，三場皆過 72% 才標穩定', () => {
   assert.equal(result.pulse.n, 40);
 });
 
-test('下一步優先順序為隔日盲訂正、全真校準、嚴重斷裂，否則進觀念理解', () => {
+test('下一步優先順序為隔日盲訂正、未完成大綱；大綱完成後才排全真校準、弱點與觀念', () => {
   const { run } = loadApp();
   const states = plain(run(`(() => {
-    S.attempts = []; S.mocks = []; S.wrong = {}; S.corrections = [];
-    const noData = nextBestAction();
+    S.attempts = []; S.mocks = []; S.wrong = {}; S.corrections = []; S.outlineAttempts = [];
+    const outline = nextBestAction();
     S.corrections = [{ id:'c1', due:today(), entries:[{ qid:BANK[0].id, done:false }] }];
     const due = nextBestAction();
     S.corrections = [];
+    S.outlineAttempts = OUTLINE_DEFAULTS.map((unit, i) => ({ id:'o' + i, unitId:unit.id, ts:i + 1, due:addDays(today(), 2) }));
+    const noData = nextBestAction();
     S.mocks = [{ d: today(), score:68, total:100, ok:68, n:100, acc:.68 }];
     for (let i = 0; i < 4; i++) S.attempts.push({ qid:BANK.find((q) => q.topic === 'num').id, ok:false, ms:180000, d:today(), mode:'mixed', ts:i + 1 });
     const weak = nextBestAction();
     S.attempts = [];
     const normal = nextBestAction();
-    return { noData: noData.kind, due: due.kind, weak: weak.kind, normal: normal.kind };
+    return { outline:outline.kind, noData:noData.kind, due:due.kind, weak:weak.kind, normal:normal.kind };
   })()`));
-  assert.deepEqual(states, { noData: 'mock', due: 'correction', weak: 'topic', normal: 'concept' });
+  assert.deepEqual(states, { outline:'outline', noData:'mock', due:'correction', weak:'topic', normal:'concept' });
 });
 
 test('全真多選採部分計分，模考錯題排到隔天且當天不開放', () => {
@@ -86,6 +88,79 @@ test('十一單元固定保留空白頁，完成後固定兩天再測', () => {
   assert.equal(result.first, 11);
   assert.equal(result.dueNow, 10);
   assert.notEqual(result.dueDate, run('today()'));
+});
+
+test('十一單元大綱來源已完整建立語意核對基準', () => {
+  const { run } = loadApp();
+  const result = plain(run(`OUTLINE_DEFAULTS.map((unit) => ({ id:unit.id, title:unit.title, n:unit.reference.length }))`));
+  assert.deepEqual(result.map((x) => x.title), [
+    '集合、邏輯與實數系', '直角坐標系中直線、半平面與圓', '函數與多項式函數', '三角比與三角函數',
+    '有限數列與有限級數', '數據分析', '排列組合與機率', '指數與對數',
+    '平面向量、線性組合與二階行列式', '空間中的向量與直線、平面方程式', '矩陣與線性變換及其應用',
+  ]);
+  assert.equal(result.every((x, i) => x.id === `outline-${i + 1}` && x.n >= 150), true);
+  assert.equal(run("OUTLINE_DEFAULTS[9].reference.includes('高斯消去')"), true);
+  assert.equal(run("OUTLINE_DEFAULTS[10].reference.includes('線性變換')"), true);
+});
+
+test('三回私有原版模考皆為 20 題 100 分鐘並保留封面與全部跨頁', () => {
+  const { run } = loadApp();
+  const result = plain(run(`(() => {
+    const scans = PAPER_SOURCES.flatMap((source) => source.scans.map((scan) => scan.file));
+    return { bucket:PAPER_SOURCE_BUCKET, papers:PAPER_SOURCES.map((source) => ({ q:source.questions, min:source.minutes, pages:source.pages, scans:source.scans.length })), scans, unique:new Set(scans).size };
+  })()`));
+  assert.equal(result.bucket, 'matha-papers');
+  assert.deepEqual(result.papers, [
+    { q:20, min:100, pages:6, scans:4 },
+    { q:20, min:100, pages:6, scans:4 },
+    { q:20, min:100, pages:4, scans:3 },
+  ]);
+  assert.equal(result.scans.length, 11);
+  assert.equal(result.unique, 11);
+  assert.equal(result.scans.every((name) => /^mock-[123]-(?:cover|page-[1-6]-[1-6])\.png$/.test(name)), true);
+});
+
+test('原版模考批分只保存分數與錯題號，隔天鎖定且不捏造答案', () => {
+  const { context, run } = loadApp();
+  context.__app = { innerHTML: '' };
+  context.__els = {
+    '#paper-score': { value:'64' },
+    '#paper-wrong': { value:'2、7, 18' },
+    '#paper-note': { value:'第三大題來不及' },
+  };
+  context.document.querySelector = (selector) => selector === '#app' ? context.__app : context.__els[selector] || null;
+  const result = plain(run(`(() => {
+    save = () => {}; sessionChrome = () => {};
+    const source = PAPER_SOURCES[0];
+    const run = { id:'paper-run-1', sourceId:source.id, name:source.title, d:today(), createdAt:1, mt:1, status:'grading', remainingMs:600000, wrongNos:[] };
+    S.paperRuns = [run]; S.extMocks = [];
+    paperSourceSession = { source, run, urls:[] };
+    paperSourceSaveGrade();
+    return { status:run.status, due:run.due, today:today(), score:run.score, wrong:run.wrongNos, ext:S.extMocks[0], html:__app.innerHTML };
+  })()`));
+  assert.equal(result.status, 'awaiting-key');
+  assert.notEqual(result.due, result.today);
+  assert.equal(result.score, 64);
+  assert.deepEqual(result.wrong, [2, 7, 18]);
+  assert.equal(result.ext.paperRunId, 'paper-run-1');
+  assert.match(result.html, /等待補件/);
+  assert.doesNotMatch(result.html, /正確答案|詳解如下/);
+});
+
+test('原版模考暫停會凍結剩餘時間並可跨頁面續寫', () => {
+  const { run } = loadApp();
+  const result = plain(run(`(() => {
+    save = () => {};
+    const row = { id:'pause-1', status:'active', remainingMs:100000, resumeAt:Date.now() - 2000, mt:1 };
+    paperSourceSession = { source:PAPER_SOURCES[0], run:row, urls:[] };
+    paperSourcePause();
+    const frozen = paperRunLeft(row);
+    return { status:row.status, resumeAt:row.resumeAt, remaining:row.remainingMs, frozen };
+  })()`));
+  assert.equal(result.status, 'paused');
+  assert.equal(result.resumeAt, null);
+  assert.equal(result.remaining >= 97000 && result.remaining <= 99000, true);
+  assert.equal(Math.abs(result.frozen - result.remaining) < 20, true);
 });
 
 test('眼睛刷題沒有方向時隔天才到期，基本定義卡依語意結果排程', () => {

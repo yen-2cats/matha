@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0717b'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0717c'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -17,7 +17,7 @@ function stripLegacyAiSecrets(state) {
 function load() {
   const def = {
     attempts: [], wrong: {}, drills: {}, mocks: [], corrections: [], daily: {},
-    outlineAttempts: [], visionQueue: [], visionHistory: [], conceptAttempts: [], ver: 3,
+    outlineAttempts: [], visionQueue: [], visionHistory: [], conceptAttempts: [], paperRuns: [], ver: 3,
   };
   try {
     const raw = localStorage.getItem(KEY);
@@ -1987,13 +1987,102 @@ const MOCK_MIXED_MAP = new Map(MOCK_MIXED_GROUPS.flatMap((group) => group.items.
   responseType: 'written',
 }])));
 
-/* 老師指定的 11 單元名稱會由使用者稍後提供的十一份大綱建立私人內容包。
-   在內容包進來前先保留固定的十一張空白頁，避免我們擅自猜書本合併方式。 */
-const OUTLINE_DEFAULTS = Array.from({ length: 11 }, (_, i) => ({
-  id: `outline-${i + 1}`,
-  title: `第 ${i + 1} 單元（等待大綱照片）`,
-  reference: '',
-}));
+/* 2026-07-17 依使用者提供的 12 頁「數11單元大綱」逐頁人工複核。
+   reference 是語意核對基準，不複製原書版面；保留章節樹、定義、公式與關係，讓默寫可離線使用。 */
+const OUTLINE_DEFAULTS = [
+  { id: 'outline-1', title: '集合、邏輯與實數系', reference: `
+集合：集合、元素、子集、空集合、宇集、餘集；能用列舉法與描述法表示。有限集合會用容斥原理計數：n(A∪B)=n(A)+n(B)-n(A∩B)，三集合時加單集、減兩兩交集、再加三者交集；也要辨認無限集合。
+邏輯：命題 p→q 的原命題、逆命題 q→p、否命題 ¬p→¬q、逆否命題 ¬q→¬p；原命題與逆否命題等價。分清充分條件、必要條件、充要條件，以及 p⇔q。
+實數系：有理數包含整數、有限小數與循環小數；無理數是不循環無限小數。會做根式化簡與乘法不等式；a,b≥0 時 (a+b)/2≥√(ab)，等號在 a=b。
+運算公式：(a±b)²、(a+b)(a-b)、(a±b)³、a³±b³ 的展開與因式分解。
+數線幾何：|a| 是 a 到 0 的距離，|a-b| 是 a、b 的距離；能把絕對值方程、不等式與區間符號互換。`.trim() },
+  { id: 'outline-2', title: '直角坐標系中直線、半平面與圓', reference: `
+平面直角坐標：兩點距離與中點公式。
+斜率：m=(y₂-y₁)/(x₂-x₁)；平行線斜率相等，垂直線斜率乘積為 -1（斜率存在時）。
+直線：點斜式 y-y₀=m(x-x₀)、一般式 ax+by+c=0；b=0 是 x=-c/a，b≠0 時斜率 -a/b。點到直線距離為 |ax₀+by₀+c|/√(a²+b²)。
+二元一次聯立方程：一組解代表兩線交一點、無解代表平行、無限多解代表重合。二元一次不等式 ax+by+c>0 或 <0 表示直線一側的半平面，可代測試點判別。
+圓：標準式 (x-h)²+(y-k)²=r²；一般式 x²+y²+Dx+Ey+F=0，圓心 (-D/2,-E/2)，半徑 √(D²+E²-4F)/2。
+直線與圓：可聯立後看判別式 D>0、=0、<0 判相割、相切、相離，或比較圓心到直線距離 d 與半徑 r。`.trim() },
+  { id: 'outline-3', title: '函數與多項式函數', reference: `
+函數：以集合定義函數，知道自變數、應變數、定義域、值域；實函數及其圖形是 {(x,f(x))}。
+多項式：會做加、減、乘、除；除法定理 f(x)=g(x)q(x)+r(x)，且 r 的次數小於 g；餘式定理 f(x) 除以 x-c 的餘式為 f(c)，因式定理 f(c)=0⇔x-c 是因式。
+多項式圖形：一次函數的斜率與截距；二次函數 f(x)=a(x-h)²+k 的開口、對稱軸、頂點；三次函數平移後的中心對稱特徵。
+方程式：n 次方程式與根；a 是 f(x)=0 的根等價於 x-a 為因式。
+不等式：一次不等式直接整理；二次不等式先由判別式與根分析符號；高次不等式可因式分解或代數方法解。`.trim() },
+  { id: 'outline-4', title: '三角比與三角函數', reference: `
+角：六十分制、弧度制；弧長 l=rθ、扇形面積=(1/2)r²θ（θ 用弧度）。
+三角比：sin²θ+cos²θ=1、sin(90°-θ)=cosθ、cos(90°-θ)=sinθ、tanθ=sinθ/cosθ；熟悉負角、180°±θ 與象限正負；極坐標 x=r cosθ、y=r sinθ。
+解三角形：面積=(1/2)bc sinA；正弦定理 a/sinA=b/sinB=c/sinC=2R；餘弦定理 a²=b²+c²-2bc cosA。
+公式：和角公式、倍角公式、半角公式，並注意半角根號的正負由 θ/2 的象限決定。
+三角函數：y=sinx、cosx、tanx 的基本圖形；a sinx+b cosx 可合成 √(a²+b²)sin(x+φ)；y=a sin(ωx+φ)+b 的振幅 |a|、週期 2π/|ω| 與平移；能解含三角函數的方程式與不等式。`.trim() },
+  { id: 'outline-5', title: '有限數列與有限級數', reference: `
+數列：等差數列 aₙ=a₁+(n-1)d；a,b,c 成等差時 b=(a+c)/2。等比數列 aₙ=a₁rⁿ⁻¹；a,b,c 成等比時 b²=ac，實數情況可能有正負兩個中項。
+遞迴：能由初值與遞迴關係決定等差、等比或其他數列。
+數學歸納法：先證 n=1（或起始值），再假設 n=k 成立並推出 n=k+1 成立。
+級數：等差和 Sₙ=n[2a₁+(n-1)d]/2=n(a₁+aₙ)/2；等比和 r≠1 時 Sₙ=a₁(1-rⁿ)/(1-r)，r=1 時 Sₙ=na₁。
+常用和：1+…+n=n(n+1)/2；1²+…+n²=n(n+1)(2n+1)/6；1³+…+n³=[n(n+1)/2]²。`.trim() },
+  { id: 'outline-6', title: '數據分析', reference: `
+代表值：算術平均、加權平均、幾何平均、眾數、中位數、百分位數。
+離散程度：全距、變異數 Var(X)=平均的 (xᵢ-μ)²、標準差 σ=√Var(X)。資料標準化 z=(x-μ)/σ，標準化後平均 0、標準差 1。
+資料轉換：Y=aX+b 時 μY=aμX+b、σY=|a|σX。
+二維資料：由散布圖辨認正相關、零相關、負相關。相關係數可由標準化資料乘積的平均求得，範圍 -1≤r≤1；r=±1 時點落在一直線上。
+線性轉換後的相關係數：正比例不改符號、負比例會反號。最適直線（迴歸直線）通過 (μx,μy)，斜率為 r·σy/σx，方程 y-μy=r(σy/σx)(x-μx)。`.trim() },
+  { id: 'outline-7', title: '排列組合與機率', reference: `
+計數原理：樹狀圖、一對一原理、加法原理、乘法原理、取捨原理。
+排列：n 個相異物全排列 n!；取 k 個排列 n!/(n-k)!；有相同物的排列需除以各類重複階乘；重複排列 nʳ（或從 m 個可重複取 n 次為 mⁿ）。
+組合：C(n,m) 可視為選 m 個或選掉 n-m 個；巴斯卡公式 C(n-1,m-1)+C(n-1,m)=C(n,m)；二項式定理展開 (x+y)ⁿ。
+機率類別：古典機率、長期相對頻率形成的客觀機率、依經驗判斷的主觀機率。
+機率性質：0≤P(A)≤1、P(Aᶜ)=1-P(A)、聯集容斥；期望值 E=Σmᵢpᵢ。
+條件機率 P(A|B)=P(A∩B)/P(B)；貝氏定理以分割事件重算後驗機率。獨立事件滿足 P(A∩B)=P(A)P(B)，多事件獨立需同時檢查各交集條件。`.trim() },
+  { id: 'outline-8', title: '指數與對數', reference: `
+指數：實數指數需底數 a>0；熟悉 aᵐaⁿ=aᵐ⁺ⁿ、(aᵐ)ⁿ=aᵐⁿ、(ab)ⁿ=aⁿbⁿ，以及 a>1 與 0<a<1 時大小關係的方向。能解指數方程與不等式。
+對數：a>0、a≠1、b>0 時 aˣ=b⇔x=logₐb；logₐ(MN)=logₐM+logₐN、logₐ(M/N)=logₐM-logₐN、logₐ(Mʳ)=rlogₐM、換底公式 logₐb=log_cb/log_ca。能解對數方程。
+圖形：y=aˣ 與 y=logₐx 互為反函數、關於 y=x 對稱；都經過 (0,1) 或 (1,0)。a>1 遞增，0<a<1 遞減。
+應用：單利與複利；科學記號、首數與尾數判斷位數；成長與衰退模型；視星等、地震等對數尺度。`.trim() },
+  { id: 'outline-9', title: '平面向量、線性組合與二階行列式', reference: `
+平面向量：向量坐標、加減、實數倍、分點公式。
+內積：a·b=|a||b|cosθ=a₁b₁+a₂b₂；向量長度與夾角；b 在 a 方向的正射影為 (a·b/|a|²)a。柯西不等式 |a·b|≤|a||b|，並理解三角不等式 |a+b|≤|a|+|b|。
+線性組合：c=xa+yb；三點共線可由位置向量的係數和為 1 判斷。
+二階行列式：|a₁ b₁; a₂ b₂| 的絕對值給平行四邊形面積；三點面積可用兩個位移向量的行列式；二元一次聯立方程可用克拉瑪公式判一解、無限多解或無解。`.trim() },
+  { id: 'outline-10', title: '空間中的向量與直線、平面方程式', reference: `
+空間坐標與向量：空間兩點、向量加減、實數倍、分點；內積 a·b=a₁b₁+a₂b₂+a₃b₃、夾角、正射影、柯西不等式。
+外積與體積：|a×b|=|a||b|sinθ 是平行四邊形面積；(a×b)·c 的絕對值是平行六面體體積。
+平面：法向量 (a,b,c)；點法式 a(x-x₀)+b(y-y₀)+c(z-z₀)=0、一般式 ax+by+cz+d=0；兩平面夾角由法向量，點到平面距離為 |ax₀+by₀+cz₀+d|/√(a²+b²+c²)，平行平面距離同理。
+直線：參數式、對稱比例式，或兩平面聯立；由方向向量判兩直線平行、相交、重合或歪斜，也能判直線與平面的一解、無限多解、無解。
+n 元一次聯立方程：代入消去、加減消去與高斯消去；以增廣矩陣做基本列運算（交換兩列、整列乘非零常數、某列加另一列倍數），化為階梯形後回代；線性方程組可寫成 AX=b。`.trim() },
+  { id: 'outline-11', title: '矩陣與線性變換及其應用', reference: `
+矩陣：行、列、元、階數；加減與係數乘按對應位置計算，矩陣乘法依列乘行，通常不可交換。
+反方陣：AB=BA=I；存在條件 det(A)≠0；二階反矩陣 A⁻¹=(1/detA)[d -b; -c a]。
+轉移矩陣：各元素非負且每欄（依本書約定）和為 1；穩定狀態 X 滿足 AX=X。
+線性變換：f(x,y)=(ax+by,cx+dy)，以矩陣 [a b; c d] 表示；變換後面積為 |detA| 倍。
+基本變換：旋轉、鏡射、推移（剪切）、伸縮；知道各自的 2×2 矩陣，以及複合變換的矩陣乘法順序。`.trim() },
+];
+
+/* 使用者提供的原版紙本模考只以私有 Storage 掃描頁呈現，不把受版權保護的題目圖片提交到公開 repo。
+   目前 PDF 僅含題本、未含答案與詳解；系統明示缺件，不自行猜答案。 */
+const PAPER_SOURCE_BUCKET = 'matha-papers';
+const PAPER_SOURCES = [
+  { id: 'paper-mock-1', title: '第一次模考', questions: 20, minutes: 100, pages: 6,
+    scans: [
+      { file: 'mock-1-cover.png', label: '封面與作答說明' },
+      { file: 'mock-1-page-1-2.png', label: '題本第 1–2 頁' },
+      { file: 'mock-1-page-3-4.png', label: '題本第 3–4 頁' },
+      { file: 'mock-1-page-5-6.png', label: '題本第 5–6 頁' },
+    ] },
+  { id: 'paper-mock-2', title: '第二次模考', questions: 20, minutes: 100, pages: 6,
+    scans: [
+      { file: 'mock-2-cover.png', label: '封面與作答說明' },
+      { file: 'mock-2-page-1-2.png', label: '題本第 1–2 頁' },
+      { file: 'mock-2-page-3-4.png', label: '題本第 3–4 頁' },
+      { file: 'mock-2-page-5-6.png', label: '題本第 5–6 頁' },
+    ] },
+  { id: 'paper-mock-3', title: '第三次模考', questions: 20, minutes: 100, pages: 4,
+    scans: [
+      { file: 'mock-3-cover.png', label: '封面與作答說明' },
+      { file: 'mock-3-page-1-2.png', label: '題本第 1–2 頁' },
+      { file: 'mock-3-page-3-4.png', label: '題本第 3–4 頁' },
+    ] },
+];
 
 /* 定義卡只存數學概念本身，不要求逐字背誦。reference 是 AI 判斷語意是否完整的準繩，
    prompt 則刻意要求「自己的話＋例子／反例」，避免只背課本句子。 */
@@ -2946,7 +3035,7 @@ const LEGACY_VIEWS = {
   stats: { label: '進度與設定', icon: 'chart', fn: renderStats },
 };
 let sessionActive = false;
-let sessionMode = null; // 'prac' | 'review' | 'mock' | 'correction' | 'outline' | 'vision' | 'concept' | 'drill'
+let sessionMode = null; // 'prac' | 'review' | 'mock' | 'correction' | 'outline' | 'vision' | 'concept' | 'drill' | 'paper-source' | 'paper-grade'
 let sessSnap = null;    // 進場快照，用於「不保留紀錄」離開時復原
 function snapSession() { sessSnap = { att: S.attempts.length, wrong: JSON.stringify(S.wrong), drills: JSON.stringify(S.drills || {}), daily: JSON.stringify(S.daily || {}) }; }
 function rollbackSession() {
@@ -2974,13 +3063,14 @@ function endSession() {
   outlineSess = null;
   conceptSess = null;
   vision = null;
+  paperSourceRelease();
   sessionChrome(false);
   modalClose();
 }
 /* 中途退出：讓飼主自己選「已作答的要不要留紀錄」，不預設丟掉 */
 function exitFlow(view) {
   // 誤觸離開後回到出發的入口頁，不要一律丟回首頁（想馬上重來一輪不用重新導航）
-  const backTo = { drill: 'stats', phone: 'stats', wflash: 'correct', prac: 'prac', review: 'correct', correction: 'correct', outline: 'outline', concept: 'concept', vision: 'mock' };
+  const backTo = { drill: 'stats', phone: 'stats', wflash: 'correct', prac: 'prac', review: 'correct', correction: 'correct', outline: 'outline', concept: 'concept', vision: 'mock', 'paper-source': 'mock', 'paper-grade': 'mock' };
   const goto = view || backTo[sessionMode] || 'home';
   if (!sessionActive) { nav(goto); return; }
   // 開著確認框的時間不算作答時間：按「繼續」時把計時起點往後平移
@@ -3001,6 +3091,29 @@ function exitFlow(view) {
     if (drillTimerWas && drill && sessionMode === 'drill') drill.nextTimer = setTimeout(drillNext, 500); // 恢復待跳的下一題
     if (phoneTimerWas && phone && sessionMode === 'phone') phone.nextTimer = setTimeout(() => { if (phone && sessionMode === 'phone') { phone.i++; phoneQuizNext(); } }, 450);
   };
+  if (sessionMode === 'paper-source' && paperSourceSession) {
+    paperSourcePause();
+    const { source, run } = paperSourceSession;
+    const paperResume = () => {
+      run.status = 'active'; run.resumeAt = Date.now(); run.mt = Date.now(); save();
+      sessionMode = 'paper-source'; renderPaperSource();
+    };
+    modal(`<h2>要暫停這回原版模考嗎？</h2><p>${escH(source.title)}還有 <b>${fmtClock(run.remainingMs)}</b>。可保留計時進度，下次從同一回繼續；也可以捨棄這次未交卷的紀錄。</p>`, [
+      ['繼續作答', paperResume, 'primary'],
+      ['保留進度，離開', () => { endSession(); nav(goto); }],
+      ['捨棄本回', () => { paperSourceDiscard(run.id); endSession(); nav(goto); }],
+    ]);
+    return;
+  }
+  if (sessionMode === 'paper-grade' && paperSourceSession) {
+    const { source, run } = paperSourceSession;
+    modal(`<h2>要暫停今天的批分嗎？</h2><p>${escH(source.title)}仍在「今天只批分」階段。可保存目前填寫的分數、錯題號與備註草稿，之後再回來完成。</p>`, [
+      ['繼續批分', null, 'primary'],
+      ['保存草稿，離開', () => { paperSourceSaveDraft(); endSession(); nav(goto); }],
+      ['捨棄本回', () => { paperSourceDiscard(run.id); endSession(); nav(goto); }],
+    ]);
+    return;
+  }
   if (sessionMode === 'judging') {
     modal('<h2>批改還沒完成</h2><p>現在離開會丟掉這一場模擬的結算與作答紀錄（已上傳的筆跡仍保存）。</p>', [
       ['回去批改', null, 'primary'],
@@ -3079,6 +3192,11 @@ function exitFlow(view) {
 let leavingApp = false;
 window.addEventListener('beforeunload', (e) => {
   if (sessionActive && !leavingApp) { e.preventDefault(); e.returnValue = ''; }
+});
+// 真正離開／重載時才落盤；beforeunload 可能被使用者取消，不能在那裡把仍在畫面的倒數永久凍住。
+window.addEventListener('pagehide', () => {
+  if (sessionMode === 'paper-source' && paperSourceSession) paperSourcePause();
+  else if (sessionMode === 'paper-grade' && paperSourceSession) paperSourceSaveDraft();
 });
 try { history.pushState({ guard: 1 }, ''); } catch (e) {}
 window.addEventListener('popstate', () => {
@@ -4869,6 +4987,23 @@ function qRedoDone() {
 }
 
 /* ═══════════ 模擬實戰 ═══════════ */
+function paperLatestRun(sourceId) {
+  return (S.paperRuns || []).filter((run) => run && run.sourceId === sourceId)
+    .sort((a, b) => Number(b.createdAt || b.mt || 0) - Number(a.createdAt || a.mt || 0))[0] || null;
+}
+function paperSourceCardHTML(source) {
+  const active = paperActiveRun(source.id), latest = paperLatestRun(source.id);
+  let status = '尚未作答';
+  let button = '開啟原版整回';
+  if (active) {
+    if (active.status === 'grading') { status = '今日批分尚未完成'; button = '繼續今日批分'; }
+    else { status = `已保留進度｜剩餘 ${fmtClock(paperRunLeft(active))}`; button = '繼續這一回'; }
+  } else if (latest && latest.status === 'awaiting-key') {
+    status = `${latest.score}/100｜錯 ${Array.isArray(latest.wrongNos) ? latest.wrongNos.length : 0} 題｜${String(latest.due || '') <= today() ? '已到訂正日，等待答案／詳解' : `鎖到 ${latest.due}`}`;
+    button = '再寫一回';
+  }
+  return `<section class="paper-source-card"><div><span class="eyebrow">私有原卷｜20 題・100 分鐘</span><h3>${escH(source.title)}</h3><p>${escH(status)}</p><small>含封面、作答說明與原始跨頁；登入後才從私有雲端載入。</small></div><button class="btn${active ? ' primary' : ''}" onclick="startPaperSource('${jsA(source.id)}')">${button}</button></section>`;
+}
 function renderMockIntro() {
   const n = S.mocks.length;
   const due = visionDueEntries();
@@ -4883,7 +5018,7 @@ function renderMockIntro() {
     <section class="card choice-card"><span class="eyebrow">完整一回</span><h2>全真模考</h2>
       <p><b>20 題、100 分鐘、滿分 100 分</b>｜6 單選、6 多選、5 選填、3 題混合／非選擇。</p>
       <p>作答中不顯示對錯或單題速度。交卷當天只批分與列錯題號，隔天才看最終答案訂正。</p>
-      <p class="dim">最後 3 題固定抽取同一組共享情境的混合題組，保留 3、4、8 分的連動小題結構。你拍完整紙本模考後，也能依原頁面、題幹與題組關係匯入。已完成 ${n} 次模考。</p>
+      <p class="dim">最後 3 題固定抽取同一組共享情境的混合題組，保留 3、4、8 分的連動小題結構。已完成 ${n} 次系統模考。</p>
       <div class="actr"><button class="btn primary big" onclick="startMock()">開始一整回（100:00）</button></div>
     </section>
     <section class="card choice-card"><span class="eyebrow">完整一回，不計算</span><h2>用眼睛刷題</h2>
@@ -4891,7 +5026,10 @@ function renderMockIntro() {
       <p>有方向就對照詳解判斷這條路是否成立；一眼就會可略過；完全沒方向則留下所屬單元／觀念，隔天再給它一次機會。</p>
       <p class="dim">已完成 ${completedPapers} 整回｜等待明天 ${waiting.length} 題｜今天到期 ${due.length} 題</p>
       <div class="actr"><button class="btn primary big" onclick="startVisionScan()">${activePaper ? `繼續本回（${activeDone}/20）` : '開始一整回（20 題）'}</button></div>
-    </section></div>`;
+    </section></div>
+    <section class="paper-library"><div class="paper-library-head"><div><span class="eyebrow">你提供的紙本來源</span><h2>原版模考庫</h2></div><p>三回都保留原來版面與跨頁。掃描檔只放私有儲存，不進公開 GitHub；目前 PDF 沒有答案與詳解，因此交卷後會如實等待補件。</p></div>
+      <div class="paper-source-grid">${PAPER_SOURCES.map(paperSourceCardHTML).join('')}</div>
+    </section>`;
 }
 
 /* ═══════════ 用眼睛刷題：第一天無方向就圈起來，第二天才可看詳解 ═══════════ */
@@ -5074,6 +5212,145 @@ function renderVisionPaperResult(entries) {
     <p>這一回練的是完整考卷裡連續切換題型時，能不能替每題叫出第一個可行方向。</p>
     <div class="actr"><button class="btn" onclick="nav('mock')">回模考與破題</button><button class="btn primary" onclick="startVisionScan()">開始下一整回</button></div></div>`;
   sessionChrome(false);
+}
+
+/* ═══════════ 私有原版紙本卷：保留掃描版面、100 分鐘整回計時 ═══════════ */
+let paperSourceSession = null;
+function paperSourceById(id) { return PAPER_SOURCES.find((source) => source.id === id) || null; }
+function paperRunLeft(run) {
+  if (!run) return 0;
+  const base = Number.isFinite(Number(run.remainingMs)) ? Number(run.remainingMs) : MOCK_SPEC.minutes * 60000;
+  return Math.max(0, base - (run.resumeAt ? Date.now() - Number(run.resumeAt) : 0));
+}
+function paperActiveRun(sourceId) {
+  return (S.paperRuns || []).filter((run) => run && run.sourceId === sourceId && ['active', 'paused', 'grading'].includes(run.status))
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))[0] || null;
+}
+function paperSourceRelease() {
+  if (paperSourceSession && Array.isArray(paperSourceSession.urls)) {
+    for (const url of paperSourceSession.urls) try { URL.revokeObjectURL(url); } catch (_) {}
+  }
+  paperSourceSession = null;
+}
+async function paperSourceFiles(source) {
+  const bucket = supa.storage.from(PAPER_SOURCE_BUCKET), urls = [];
+  try {
+    for (const scan of source.scans) {
+      const { data, error } = await bucket.download(scan.file);
+      if (error || !data) throw new Error((error && error.message) || `無法下載 ${scan.file}`);
+      urls.push(URL.createObjectURL(data));
+    }
+    return urls;
+  } catch (e) {
+    for (const url of urls) try { URL.revokeObjectURL(url); } catch (_) {}
+    throw e;
+  }
+}
+async function startPaperSource(sourceId) {
+  const source = paperSourceById(sourceId);
+  if (!source) return;
+  if (!supa || !syncState.user) { alert('原版紙本卷存放在私有雲端；請先到「進度與設定」登入。'); return; }
+  paperSourceRelease();
+  let run = paperActiveRun(sourceId);
+  if (!run) {
+    const now = Date.now();
+    run = { id: `paper-run-${now}`, sourceId, name: source.title, d: today(), createdAt: now, mt: now,
+      status: 'paused', remainingMs: source.minutes * 60000, resumeAt: null, wrongNos: [] };
+    S.paperRuns = S.paperRuns || []; S.paperRuns.push(run); save();
+  }
+  app().innerHTML = `<div class="card"><h1>正在開啟 ${escH(source.title)}</h1><p class="dim">從私有題本載入封面與 ${source.pages} 頁原卷，不會把掃描內容放到公開網站。</p></div>`;
+  try {
+    const urls = await paperSourceFiles(source);
+    run.status = run.status === 'grading' ? 'grading' : 'active';
+    if (run.status === 'active') run.resumeAt = Date.now();
+    run.mt = Date.now(); save();
+    paperSourceSession = { source, run, urls };
+    sessionActive = true; sessionMode = run.status === 'grading' ? 'paper-grade' : 'paper-source';
+    if (run.status === 'grading' || paperRunLeft(run) <= 0) paperSourceGrade(run.status === 'grading' ? '繼續今天的批分' : '時間到');
+    else renderPaperSource();
+  } catch (e) {
+    run.status = 'paused'; run.resumeAt = null; run.mt = Date.now(); save();
+    app().innerHTML = `<div class="card warn"><h2>原卷暫時載入失敗</h2><p>${escH((e && e.message) || e)}</p><div class="actr"><button class="btn" onclick="nav('mock')">回模考與破題</button><button class="btn primary" onclick="startPaperSource('${jsA(sourceId)}')">重試</button></div></div>`;
+  }
+}
+function renderPaperSource() {
+  if (!paperSourceSession) return renderMockIntro();
+  const { source, run, urls } = paperSourceSession;
+  const left = paperRunLeft(run);
+  app().innerHTML = `<div class="session-head"><span>${escH(source.title)}｜原版整回｜20 題</span><span class="shr"><span id="paper-clock" class="timer">${fmtClock(left)}</span><button class="btn sm xbtn" onclick="exitFlow()" title="離開">✕</button></span></div>
+    <div class="vision-rule"><b>100 分鐘全真作答。</b>原卷版面、跨頁、圖表與第 18–20 題題組都照紙本保留；請在實體紙張或另一張計算紙作答。</div>
+    <div class="paper-scan-stack">${urls.map((url, i) => `<figure class="paper-scan"><img src="${url}" alt="${escH(source.title)}${escH(source.scans[i].label)}"><figcaption><span>${escH(source.scans[i].label)}</span><a href="${url}" target="_blank" rel="noopener">放大原頁</a></figcaption></figure>`).join('')}</div>
+    <div class="paper-submit-bar"><span>完成後只登錄分數與錯題號；今天不訂正。</span><button class="btn primary big" onclick="paperSourceGrade('主動交卷')">交卷，進入今日批分</button></div>`;
+  sessionChrome(true);
+  startTicker(() => {
+    if (!paperSourceSession || sessionMode !== 'paper-source') return stopTicker();
+    const remain = paperRunLeft(run), clock = $('#paper-clock');
+    if (clock) clock.textContent = fmtClock(remain);
+    if (remain <= 0) paperSourceGrade('時間到');
+  });
+}
+function paperSourcePause() {
+  if (!paperSourceSession) return;
+  const run = paperSourceSession.run;
+  run.remainingMs = paperRunLeft(run); run.resumeAt = null; run.status = 'paused'; run.mt = Date.now(); save();
+}
+function paperSourceSaveDraft() {
+  if (!paperSourceSession) return;
+  const run = paperSourceSession.run;
+  run.gradeDraft = {
+    score: String((($('#paper-score') || {}).value || '')).trim().slice(0, 8),
+    wrong: String((($('#paper-wrong') || {}).value || '')).trim().slice(0, 120),
+    note: String((($('#paper-note') || {}).value || '')).trim().slice(0, 500),
+  };
+  run.status = 'grading'; run.resumeAt = null; run.mt = Date.now(); save();
+}
+function paperSourceDiscard(runId) {
+  S.paperRuns = (S.paperRuns || []).filter((run) => run && run.id !== runId);
+  S.extMocks = (S.extMocks || []).filter((row) => row && row.paperRunId !== runId);
+  save();
+}
+function paperSourceGrade(reason) {
+  if (!paperSourceSession) return;
+  stopTicker();
+  const { source, run, urls } = paperSourceSession;
+  run.remainingMs = paperRunLeft(run); run.resumeAt = null; run.status = 'grading'; run.gradeReason = reason; run.mt = Date.now(); save();
+  sessionMode = 'paper-grade';
+  const used = Math.max(0, source.minutes - Math.round(run.remainingMs / 60000));
+  app().innerHTML = `<div class="session-head"><span>${escH(source.title)}｜今日只批分</span><button class="btn sm xbtn" onclick="exitFlow()" title="離開">✕</button></div>
+    <div class="card"><h1>${escH(reason)}</h1><p>作答約 <b>${used} 分鐘</b>。請依正式答案批出總分與錯題號；<b>今天不要訂正</b>。</p>
+      <div class="notice"><b>目前提供的 PDF 只有題本，沒有答案頁與詳解。</b><p>系統不會猜答案。請用你手上的答案本完成今天批分；你補拍答案／詳解後，我再把隔日盲訂正接完整。</p></div>
+      <div class="paper-grade-fields"><label>總分（0–100）<input id="paper-score" class="ans-input" type="number" min="0" max="100" inputmode="decimal" value="${run.score == null ? escH((run.gradeDraft || {}).score || '') : escH(run.score)}" placeholder="例如 63"></label>
+      <label>錯題號（用空格、逗號或頓號分隔）<input id="paper-wrong" class="ans-input" inputmode="numeric" value="${(run.wrongNos || []).length ? (run.wrongNos || []).join('、') : escH((run.gradeDraft || {}).wrong || '')}" placeholder="例如 3、7、12、18"></label>
+      <label>今天只留給明天看的備註（選填）<textarea id="paper-note" rows="2" placeholder="例如：第 18–20 題沒寫完；今天先不看詳解。">${escH(run.note || (run.gradeDraft || {}).note || '')}</textarea></label></div>
+      <p id="paper-grade-msg" class="warnc"></p><div class="actr"><button class="btn primary big" onclick="paperSourceSaveGrade()">保存批分，鎖到明天</button></div></div>
+    <details class="card"><summary>需要核對題號時展開原卷</summary><div class="paper-scan-stack compact">${urls.map((url, i) => `<figure class="paper-scan"><img src="${url}" alt="${escH(source.title)}${escH(source.scans[i].label)}"><figcaption><span>${escH(source.scans[i].label)}</span><a href="${url}" target="_blank" rel="noopener">放大原頁</a></figcaption></figure>`).join('')}</div></details>`;
+  sessionChrome(true);
+}
+function paperSourceSaveGrade() {
+  if (!paperSourceSession) return;
+  const { source, run } = paperSourceSession;
+  const score = Number((($('#paper-score') || {}).value || '').trim());
+  const raw = ((($('#paper-wrong') || {}).value || '').trim());
+  const wrongNos = [...new Set(raw.split(/[\s,，、;；]+/).filter(Boolean).map(Number))].sort((a, b) => a - b);
+  const msg = $('#paper-grade-msg');
+  if (!Number.isFinite(score) || score < 0 || score > 100) { if (msg) msg.textContent = '總分請填 0 到 100。'; return; }
+  if (wrongNos.some((n) => !Number.isInteger(n) || n < 1 || n > 20)) { if (msg) msg.textContent = '錯題號只能填 1 到 20。'; return; }
+  if (score < 100 && !wrongNos.length) { if (msg) msg.textContent = '分數未滿 100 時，請至少留下錯題號，明天才能訂正。'; return; }
+  const note = ((($('#paper-note') || {}).value || '')).trim().slice(0, 500);
+  run.score = score; run.wrongNos = wrongNos; run.note = note; run.gradeDraft = null; run.status = 'awaiting-key'; run.submittedAt = Date.now();
+  run.due = addDays(today(), 1); run.mt = Date.now();
+  S.extMocks = S.extMocks || [];
+  if (!S.extMocks.some((m) => m.paperRunId === run.id)) S.extMocks.push({
+    id: `external-${run.id}`, paperRunId: run.id, sourceId: source.id, d: today(), ts: run.submittedAt,
+    name: source.title, score, total: 100, minutesLeft: Math.max(0, Math.round(run.remainingMs / 60000)),
+    topics: [], err: '', note: `${wrongNos.length ? `錯題 ${wrongNos.join('、')}` : '全對'}${note ? `｜${note}` : ''}`,
+  });
+  save();
+  sessionActive = false; sessionMode = null; sessionChrome(false);
+  paperSourceRelease();
+  app().innerHTML = `<h1>今日批分已保存</h1><div class="card good"><p class="big">${escH(source.title)}：<b>${score}/100</b></p><p>錯題號：<b>${wrongNos.length ? wrongNos.join('、') : '無'}</b></p>
+    <div class="warn"><b>鎖到 ${run.due}。</b>明天再看最終答案重想方向；目前還缺這三回的答案／詳解頁，系統已明確標記為等待補件，不會用猜的代替。</div>
+    <div class="actr"><button class="btn" onclick="nav('mock')">回模考與破題</button><button class="btn primary" onclick="nav('home')">回今日</button></div></div>`;
 }
 let mock = null;
 function buildPaper(forVision) {
@@ -5465,8 +5742,18 @@ function renderCorrections() {
     <p>第一級 ${c.l1} 題；其餘 ${c.open} 題的<b>答案與詳解鎖到 ${batch.due}</b>，今天不訂正。</p><div class="actr"><button class="btn" onclick="renderTeacherReport('${jsA(batch.id)}')">查看目前紀錄</button></div></div>`; }).join('');
   const completed = all.filter((batch) => (batch.entries || []).length && (batch.entries || []).every((x) => x.done)).slice(0, 6);
   const completedCards = completed.map((batch) => { const c = correctionCounts(batch); return `<div class="report-row"><span>${batch.d}</span><b>第一級 ${c.l1}｜第二級 ${c.l2}｜第三級 ${c.l3}</b><button class="btn sm" onclick="renderTeacherReport('${jsA(batch.id)}')">老師檢視</button></div>`; }).join('');
+  const sourceWaiting = (S.paperRuns || []).filter((run) => run && run.status === 'awaiting-key')
+    .sort((a, b) => Number(b.submittedAt || 0) - Number(a.submittedAt || 0));
+  const sourceWaitingCards = sourceWaiting.map((run) => {
+    const dueNow = String(run.due || '') <= today();
+    return `<div class="card paper-key-wait"><span class="eyebrow">原版紙本卷｜${dueNow ? '已到訂正日' : '尚未到期'}</span><h2>${escH(run.name || '原版模考')}｜${run.d}</h2>
+      <p><b>${run.score}/100</b>｜錯題 ${Array.isArray(run.wrongNos) && run.wrongNos.length ? run.wrongNos.join('、') : '無'}。</p>
+      <div class="notice"><b>${dueNow ? '今天本應開始只看答案重想方向，但仍缺答案／詳解頁。' : `答案與訂正鎖到 ${run.due}。`}</b><p>${dueNow ? '系統不會猜答案或製造假詳解。補上答案與詳解頁後，這回才會進入老師要求的盲訂正三級流程。' : '到期前只保留分數與錯題號，今天不訂正。'}</p></div>
+    </div>`;
+  }).join('');
   app().innerHTML = `<h1>隔日訂正</h1>
-    ${dueCards || '<div class="card"><p>今天沒有到期的盲訂正。</p><div class="actr"><button class="btn primary" onclick="nav(\'mock\')">去找一題破題方向</button></div></div>'}
+    ${dueCards || (!sourceWaitingCards ? '<div class="card"><p>今天沒有到期的盲訂正。</p><div class="actr"><button class="btn primary" onclick="nav(\'mock\')">去做一整回混合訓練</button></div></div>' : '')}
+    ${sourceWaitingCards ? `<h2>原版紙本卷</h2>${sourceWaitingCards}` : ''}
     ${waitingCards ? `<h2>尚未到期</h2>${waitingCards}` : ''}
     ${completedCards ? `<details class="card" open><summary>已完成的模考三級紀錄</summary><div class="report-list">${completedCards}</div></details>` : ''}`;
 }
@@ -6541,8 +6828,15 @@ function mergeState(a, b) {
     if (!old || Number(x.mt || x.ts || 0) >= Number(old.mt || old.ts || 0)) visionMap.set(x.id, x);
   }
   const visionQueue = [...visionMap.values()].sort((x, y) => Number(x.ts || 0) - Number(y.ts || 0));
+  const paperMap = new Map();
+  for (const run of [...(b.paperRuns || []), ...(a.paperRuns || [])]) {
+    if (!run || !run.id) continue;
+    const old = paperMap.get(run.id);
+    if (!old || Number(run.mt || run.submittedAt || run.createdAt || 0) >= Number(old.mt || old.submittedAt || old.createdAt || 0)) paperMap.set(run.id, run);
+  }
+  const paperRuns = [...paperMap.values()].sort((x, y) => Number(x.createdAt || 0) - Number(y.createdAt || 0));
   const merged = { ...b, ...a, attempts, wrong, drills, mocks, corrections, extMocks, daily, extbank, sidePractice,
-    outlineAttempts, conceptAttempts, visionHistory, visionQueue };
+    outlineAttempts, conceptAttempts, visionHistory, visionQueue, paperRuns };
   // 內容包（公式卡/重點整理）：兩裝置聯集、rev 大者勝
   if ((a.extflash || []).length || (b.extflash || []).length) merged.extflash = unionById(a.extflash, b.extflash);
   if ((a.extnotes || []).length || (b.extnotes || []).length) merged.extnotes = unionById(a.extnotes, b.extnotes);
