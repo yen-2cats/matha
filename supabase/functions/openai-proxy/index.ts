@@ -197,6 +197,36 @@ const responseSchemas = {
     },
     required: ["questions", "note"],
   },
+  paper_detail: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      readable: { type: "boolean" },
+      read: { type: "string", maxLength: 300 },
+      firstError: { type: ["string", "null"], maxLength: 300 },
+      errorKind: { type: ["string", "null"], maxLength: 80 },
+      explanation: { type: "string", maxLength: 1400 },
+      solution: {
+        type: "array",
+        maxItems: 8,
+        items: { type: "string", maxLength: 300 },
+      },
+      answer: { type: "string", maxLength: 120 },
+      nextTime: { type: "string", maxLength: 180 },
+      marks: { type: "array", maxItems: 2, items: markSchema },
+    },
+    required: [
+      "readable",
+      "read",
+      "firstError",
+      "errorKind",
+      "explanation",
+      "solution",
+      "answer",
+      "nextTime",
+      "marks",
+    ],
+  },
 };
 
 function normalizeMessages(raw: unknown) {
@@ -358,6 +388,7 @@ Deno.serve(async (req: Request) => {
         "outline",
         "concept",
         "paper_grade",
+        "paper_detail",
         "text",
         "test",
       ].includes(
@@ -373,6 +404,7 @@ Deno.serve(async (req: Request) => {
       "outline",
       "concept",
       "paper_grade",
+      "paper_detail",
     ].includes(responseType);
     const instructions = isTest ? "Reply with exactly OK." : String(
       body.instructions ||
@@ -391,6 +423,8 @@ Deno.serve(async (req: Request) => {
         ? 32
         : responseType === "paper_grade"
         ? 5000
+        : responseType === "paper_detail"
+        ? 4200
         : (isStructured ? 3500 : 3000),
       reasoning: { effort: isTest ? "none" : "medium" },
       store: false,
@@ -409,6 +443,7 @@ Deno.serve(async (req: Request) => {
                 | "outline"
                 | "concept"
                 | "paper_grade"
+                | "paper_detail"
             ],
           },
         }

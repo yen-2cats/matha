@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0717n'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0717o'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -5578,9 +5578,8 @@ function paperAiPageQuestions(page) {
     ? result.questions.filter((item) => Number(item && item.page) === Number(page) + 1)
     : [];
 }
-function paperAiPaint() {
-  const cv = $('#paper-ai-canvas');
-  if (!cv || !paperSourceSession || !cv.clientWidth || !cv.clientHeight) return;
+function paperAiPaintCanvas(cv, questions, includeAnswer) {
+  if (!cv || !cv.clientWidth || !cv.clientHeight) return;
   const dpr = window.devicePixelRatio || 1, width = cv.clientWidth, height = cv.clientHeight;
   if (cv.width !== Math.round(width * dpr) || cv.height !== Math.round(height * dpr)) {
     cv.width = Math.max(1, Math.round(width * dpr));
@@ -5595,7 +5594,7 @@ function paperAiPaint() {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.font = `700 ${Math.max(14, Math.min(25, width / 46))}px system-ui, sans-serif`;
-  for (const item of paperAiPageQuestions(paperSourceSession.page)) {
+  for (const item of questions || []) {
     for (const mark of Array.isArray(item.marks) ? item.marks : []) {
       const box = Array.isArray(mark && mark.box) ? mark.box.map(Number) : [];
       if (box.length !== 4 || box.some((n) => !Number.isFinite(n))) continue;
@@ -5604,18 +5603,26 @@ function paperAiPaint() {
       const right = Math.max(0, Math.min(1, Math.max(box[0], box[2]))) * width;
       const bottom = Math.max(0, Math.min(1, Math.max(box[1], box[3]))) * height;
       ctx.strokeRect(left, top, Math.max(8, right - left), Math.max(8, bottom - top));
-      const label = String(mark.label || '').slice(0, 16);
+      const statusLabel = String(mark.label || '').slice(0, 16);
+      const storedAnswer = item.answer || (includeAnswer && paperSourceSession && paperSourceSession.source
+        ? paperFinalAnswerText(paperSourceSession.source.key[Number(item.no) - 1]) : '');
+      const answerLabel = includeAnswer && storedAnswer ? `｜正答 ${String(storedAnswer).slice(0, 26)}` : '';
+      const label = `${statusLabel}${answerLabel}`.slice(0, 42);
       if (!label) continue;
       const metrics = ctx.measureText(label), pad = 5;
-      const labelWidth = metrics.width + pad * 2, labelHeight = Math.max(22, width / 35);
+      const labelWidth = Math.min(width - 4, metrics.width + pad * 2), labelHeight = Math.max(22, width / 35);
       const labelX = Math.min(Math.max(0, left), Math.max(0, width - labelWidth));
       const labelY = top >= labelHeight + 3 ? top - labelHeight - 3 : Math.min(height - labelHeight, bottom + 3);
       ctx.fillRect(labelX, labelY, labelWidth, labelHeight);
       ctx.fillStyle = '#fffdf8';
-      ctx.fillText(label, labelX + pad, labelY + labelHeight * .72);
+      ctx.fillText(label, labelX + pad, labelY + labelHeight * .72, Math.max(1, labelWidth - pad * 2));
       ctx.fillStyle = PAPER_AI_RED;
     }
   }
+}
+function paperAiPaint() {
+  if (!paperSourceSession) return;
+  paperAiPaintCanvas($('#paper-ai-canvas'), paperAiPageQuestions(paperSourceSession.page), true);
 }
 function paperInkPoint(e, cv) {
   const rect = cv.getBoundingClientRect();
@@ -5960,9 +5967,8 @@ function paperImageLoad(url) {
     image.src = url;
   });
 }
-async function paperPageComposite(page) {
-  if (!paperSourceSession) throw new Error('原卷工作階段不存在');
-  const { source, urls } = paperSourceSession, scan = source.scans[page];
+async function paperCompositeImage(source, urls, inkPages, page) {
+  const scan = source.scans[page];
   const image = await paperImageLoad(urls[page]);
   const width = 1536, height = Math.round(width * 2535 / 2112);
   const canvas = document.createElement('canvas');
@@ -5981,9 +5987,18 @@ async function paperPageComposite(page) {
   for (let y = height * .08; y < height * .96; y += height * .017) {
     ctx.beginPath(); ctx.moveTo(marginX + 8, y); ctx.lineTo(width * .975, y); ctx.stroke();
   }
-  const data = paperInkPage(page);
+  const data = inkPages && inkPages[page];
   for (const stroke of data && Array.isArray(data.s) ? data.s : []) paperInkLine(ctx, stroke, width, height);
   return canvas.toDataURL('image/jpeg', .9).split(',')[1];
+}
+async function paperPageComposite(page) {
+  if (!paperSourceSession) throw new Error('原卷工作階段不存在');
+  return paperCompositeImage(
+    paperSourceSession.source,
+    paperSourceSession.urls,
+    paperSourceSession.inkPages,
+    page,
+  );
 }
 function paperGradePromptKey(source) {
   return source.key.map((q, index) => ({
@@ -6008,9 +6023,10 @@ async function paperAiGradeCall(source, pages) {
 3. 單選與填答答對得該題滿分，答錯或未答 0 分；等價分數、根式、小數形式可算對。
 4. 多選依五個選項逐一判定：全對 5 分、錯 1 個選項 3 分、錯 2 個選項 1 分、錯 3 個以上 0 分。
 5. status：正確 correct、錯誤 incorrect、沒有作答 unanswered、筆跡真的無法辨識 uncertain。不要為了湊答案而猜。
-6. 每題用 marks 框住考生的最終答案或作答區，座標是該張完整單頁的 [左,上,右,下] 0–1 比例。只做閱卷紅筆標記，不提供正解、詳解、提示或訂正方向。
+6. 每題用 marks 框住考生的最終答案或作答區，座標是該張完整單頁的 [左,上,右,下] 0–1 比例。你只負責判定對錯、核分與定位；系統會自行從正式答案鍵標出正確答案。
 7. label 只可使用「✓ +分數」「✕ 0」「△ +部分分」「未作答」「看不清楚」這類短標記。
-8. read 記錄你實際辨識到的考生答案，供系統稽核；note 只記錄整體辨識風險，不要寫解法。`,
+8. read 記錄你實際辨識到的考生答案，供系統稽核；note 只記錄整體辨識風險。
+9. 這是第一次簡批。禁止輸出詳解、提示、破題方向、錯誤類型或「從哪一步開始錯」；也不要把這些內容塞進 read、note 或 label。`,
   }];
   pages.forEach((b64, index) => {
     content.push({ type: 'text', text: `【完整單頁 ${index + 1}／${pages.length}】` });
@@ -6058,6 +6074,7 @@ function paperNormalizeAiGrade(source, raw, model) {
     }).filter(Boolean);
     return {
       no, page, status, points,
+      answer: paperFinalAnswerText(q),
       read: String(item.read || '').slice(0, 120),
       marks: marks.length ? marks : [paperFallbackMark(source, no, page, label)],
     };
@@ -6082,7 +6099,7 @@ function renderPaperSource() {
       <span id="paper-clock" class="timer paper-timer">${fmtClock(left)}</span>
       <div class="paper-workgroup right"><button class="paper-icon-btn" onclick="paperWorkspaceZoom(-.25)" aria-label="縮小題本">−</button><span id="paper-zoom-label" class="paper-zoom-label">${Math.round(paperSourceSession.zoom * 100)}%</span><button class="paper-icon-btn" onclick="paperWorkspaceZoom(.25)" aria-label="放大題本">＋</button><span class="paper-page-label"><b>${page + 1} / ${source.scans.length}</b><small>${escH(scan.label)}</small></span><button class="paper-icon-btn" onclick="paperWorkspacePage(-1)" ${page <= 0 ? 'disabled' : ''} aria-label="上一頁">${uiIcon('arrow-left')}</button><button class="paper-icon-btn" onclick="paperWorkspacePage(1)" ${page >= source.scans.length - 1 ? 'disabled' : ''} aria-label="下一頁">${uiIcon('arrow-right')}</button><button class="paper-icon-btn" onclick="exitFlow()" aria-label="離開">${uiIcon('x')}</button></div></div>
     <div class="paper-workspace"><section class="paper-source-pane"><div class="paper-pane-caption"><span>清晰單頁・直接在原卷作答</span><small id="paper-ink-status">筆跡自動保存</small></div><div class="paper-ink-tools"><button id="paper-tool-pen" onclick="paperInkModeSet('pen')">${uiIcon('pencil')}筆</button><button id="paper-tool-erase" onclick="paperInkModeSet('erase')">${uiIcon('erase')}橡皮擦</button><button onclick="paperInkUndo()">${uiIcon('undo')}復原</button><button onclick="paperInkClear()">${uiIcon('x')}清空本頁</button><div class="paper-color-group" role="group" aria-label="畫筆顏色"><button id="paper-color-black" class="paper-color-button" onclick="paperInkColorSet('black')" aria-label="黑色筆" aria-pressed="${paperSourceSession.inkColor === 'black'}"><i style="--ink:${PAPER_INK_COLORS.black}"></i><span>黑</span></button><button id="paper-color-blue" class="paper-color-button" onclick="paperInkColorSet('blue')" aria-label="藍色筆" aria-pressed="${paperSourceSession.inkColor === 'blue'}"><i style="--ink:${PAPER_INK_COLORS.blue}"></i><span>藍</span></button><button id="paper-color-green" class="paper-color-button" onclick="paperInkColorSet('green')" aria-label="綠色筆" aria-pressed="${paperSourceSession.inkColor === 'green'}"><i style="--ink:${PAPER_INK_COLORS.green}"></i><span>綠</span></button></div><label class="paper-pen-width" for="paper-pen-width"><span>筆粗 <b id="paper-pen-width-label">${Math.round(paperInkWidthValue(paperSourceSession.inkWidth) * 100)}%</b></span><input id="paper-pen-width" type="range" min="35" max="200" step="5" value="${Math.round(paperInkWidthValue(paperSourceSession.inkWidth) * 100)}" oninput="paperInkWidthSet(this.value)" aria-label="調整畫筆粗細"></label></div><div class="paper-page-viewport"><div id="paper-write-sheet" class="paper-write-sheet" data-side="${scan.side}" style="width:${paperSourceSession.zoom * 100}%;max-width:${1180 * paperSourceSession.zoom}px"><div class="paper-question-crop"><img id="paper-source-image" src="${urls[page]}" alt="${escH(source.title)} ${escH(scan.label)}"></div><div class="paper-note-margin" aria-hidden="true"></div><canvas id="paper-ink-canvas" aria-label="可直接書寫並左右滑動翻頁的題本頁"></canvas><canvas id="paper-ai-canvas" aria-hidden="true"></canvas></div><p class="paper-write-hint">S Pen 直接書寫；側鍵按住時暫時變橡皮擦，放開立即恢復。手指左右滑動翻頁；放大後單指移動頁面，雙指縮放。AI 交卷後才會用獨立紅筆層批改。</p></div></section></div>
-    <div class="paper-finish-bar"><span>${source.questions} 題・${source.minutes} 分鐘｜答案直接寫在卷面，不另填答案卡</span><button class="btn primary" onclick="paperSourceGrade('主動交卷')">交卷，AI 紅筆批改</button></div></div>`;
+    <div class="paper-finish-bar"><span>${source.questions} 題・${source.minutes} 分鐘｜答案直接寫在卷面，不另填答案卡</span><button class="btn primary" onclick="paperSourceGrade('主動交卷')">第一次批改｜對錯、分數、正確答案</button></div></div>`;
   sessionChrome(true);
   paperInkAttach();
   startTicker(() => {
@@ -6133,8 +6150,9 @@ function paperSourceRecordGrade(source, run, grade) {
   save();
 }
 function paperSourceGradeLoading(source, reason, progress, error) {
-  app().innerHTML = `<div class="paper-grade-loading card${error ? ' warn' : ''}"><span class="eyebrow">GPT‑5.5 整卷視覺批改</span><h1>${error ? '這次批改沒有完成' : escH(reason)}</h1><p id="paper-grade-progress">${escH(progress)}</p>
+  app().innerHTML = `<div class="paper-grade-loading card${error ? ' warn' : ''}"><span class="eyebrow">第一次批改｜GPT‑5.5 整卷視覺核分</span><h1>${error ? '這次批改沒有完成' : escH(reason)}</h1><p id="paper-grade-progress">${escH(progress)}</p>
     ${error ? `<p class="warnc">${escH(error)}</p><div class="actr"><button class="btn" onclick="exitFlow()">先離開</button><button class="btn primary" onclick="paperSourceGrade('重新批改')">重新批改整份原卷</button></div>` : '<div class="paper-grade-pulse" aria-hidden="true"><span></span></div><p class="dim">正在辨識卷面上的黑、藍、綠筆跡並逐題核分。今天不會顯示正解或詳解。</p>'}
+    ${error ? `<p class="warnc">${escH(error)}</p><div class="actr"><button class="btn" onclick="exitFlow()">先離開</button><button class="btn primary" onclick="paperSourceGrade('重新批改')">重新批改整份原卷</button></div>` : '<div class="paper-grade-pulse" aria-hidden="true"><span></span></div><p class="dim">這一輪只判定對錯、計分並標出正式答案；不分析步驟，也不提供詳解。</p>'}
     <small>${escH(source.title)}｜請保持此頁開啟；即使失敗，原筆跡也不會消失。</small></div>`;
   sessionChrome(true);
 }
@@ -6184,10 +6202,10 @@ function renderPaperGradeResult() {
   const page = paperSourceSession.page, scan = source.scans[page];
   const uncertain = Array.isArray(grade.uncertainNos) ? grade.uncertainNos : [];
   app().innerHTML = `<div class="paper-session-shell is-graded">
-    <div class="paper-workbar"><div class="paper-work-title"><b>GPT‑5.5 紅筆批改</b><small>${escH(source.title)}</small></div><strong class="paper-result-score">${grade.score} / 100</strong>
+    <div class="paper-workbar"><div class="paper-work-title"><b>第一次批改｜對錯、分數、正確答案</b><small>${escH(source.title)}</small></div><strong class="paper-result-score">${grade.score} / 100</strong>
       <div class="paper-workgroup right"><button class="paper-icon-btn" onclick="paperWorkspaceZoom(-.25)" aria-label="縮小題本">−</button><span id="paper-zoom-label" class="paper-zoom-label">${Math.round(paperSourceSession.zoom * 100)}%</span><button class="paper-icon-btn" onclick="paperWorkspaceZoom(.25)" aria-label="放大題本">＋</button><span class="paper-page-label"><b>${page + 1} / ${source.scans.length}</b><small>${escH(scan.label)}</small></span><button class="paper-icon-btn" onclick="paperWorkspacePage(-1)" ${page <= 0 ? 'disabled' : ''} aria-label="上一頁">${uiIcon('arrow-left')}</button><button class="paper-icon-btn" onclick="paperWorkspacePage(1)" ${page >= source.scans.length - 1 ? 'disabled' : ''} aria-label="下一頁">${uiIcon('arrow-right')}</button><button class="paper-icon-btn" onclick="paperSourceCloseResult()" aria-label="關閉批改結果">${uiIcon('x')}</button></div></div>
-    <div class="paper-workspace"><section class="paper-source-pane"><div class="paper-pane-caption"><span>你的原筆跡＋AI 紅筆標記</span><small>單指左右滑動翻頁・雙指縮放</small></div><div class="paper-page-viewport"><div id="paper-write-sheet" class="paper-write-sheet" data-side="${scan.side}" style="width:${paperSourceSession.zoom * 100}%;max-width:${1180 * paperSourceSession.zoom}px"><div class="paper-question-crop"><img id="paper-source-image" src="${urls[page]}" alt="${escH(source.title)} ${escH(scan.label)}"></div><div class="paper-note-margin" aria-hidden="true"></div><canvas id="paper-ink-canvas" aria-label="可左右滑動查看 AI 紅筆批改的題本頁"></canvas><canvas id="paper-ai-canvas" aria-label="AI 紅筆批改標記"></canvas></div><p class="paper-write-hint">紅框與短記號只顯示本題得分狀態，不會在交卷當天洩漏正解、詳解或提示。明天才進入只看答案的盲訂正。</p></div></section></div>
-    <div class="paper-finish-bar paper-result-bar"><span>錯題：${grade.wrongNos.length ? grade.wrongNos.join('、') : '無'}${uncertain.length ? `｜看不清楚：${uncertain.join('、')}` : ''}｜答案鎖到 ${run.due}</span><button class="btn primary" onclick="paperSourceCloseResult()">完成，回模考入口</button></div></div>`;
+    <div class="paper-workspace"><section class="paper-source-pane"><div class="paper-pane-caption"><span>你的原筆跡＋AI 紅筆標記</span><small>單指左右滑動翻頁・雙指縮放</small></div><div class="paper-page-viewport"><div id="paper-write-sheet" class="paper-write-sheet" data-side="${scan.side}" style="width:${paperSourceSession.zoom * 100}%;max-width:${1180 * paperSourceSession.zoom}px"><div class="paper-question-crop"><img id="paper-source-image" src="${urls[page]}" alt="${escH(source.title)} ${escH(scan.label)}"></div><div class="paper-note-margin" aria-hidden="true"></div><canvas id="paper-ink-canvas" aria-label="可左右滑動查看 AI 紅筆批改的題本頁"></canvas><canvas id="paper-ai-canvas" aria-label="AI 紅筆批改標記"></canvas></div><p class="paper-write-hint">紅筆只標對錯、得分與正式答案；不告訴你怎麼算，也不分析從哪一步開始錯。隔天重新努力仍卡住，才可按第二次 AI 詳批。</p></div></section></div>
+    <div class="paper-finish-bar paper-result-bar"><span>錯題：${grade.wrongNos.length ? grade.wrongNos.join('、') : '無'}${uncertain.length ? `｜看不清楚：${uncertain.join('、')}` : ''}｜第二次詳批最早 ${run.due}</span><button class="btn primary" onclick="paperSourceCloseResult()">完成，回模考入口</button></div></div>`;
   sessionChrome(true);
   paperInkAttach();
 }
@@ -6594,7 +6612,7 @@ function renderCorrections() {
     const dueNow = String(run.due || '') <= today();
     return `<div class="card paper-key-wait"><span class="eyebrow">原版紙本卷｜${dueNow ? '已到訂正日' : '尚未到期'}</span><h2>${escH(run.name || '原版模考')}｜${run.d}</h2>
       <p><b>${run.score}/100</b>｜錯題 ${Array.isArray(run.wrongNos) && run.wrongNos.length ? run.wrongNos.join('、') : '無'}。</p>
-      <div class="notice"><b>${dueNow ? '今天先只看最終答案，重新找一次方向。' : `答案與訂正鎖到 ${run.due}。`}</b><p>${dueNow ? '每次只開一題的答案；留下可給老師看的方向後，仍無收穫才可進第三級看答案本詳解。' : '到期前只保留分數與錯題號，今天不訂正。'}</p></div>
+      <div class="notice"><b>${dueNow ? '今天重新做一次；仍然卡住才開第二次 AI 詳批。' : `第二次 AI 詳批鎖到 ${run.due}。`}</b><p>${dueNow ? '先留下重新計算或破題方向。第一次簡批沒有分析步驟；只有你重試後仍不會，AI 才找第一個錯誤並給完整詳解。' : '第一次批改已標出對錯、分數與正確答案；今天不分析錯誤步驟，也不看詳解。'}</p></div>
       ${dueNow ? `<div class="actr"><button class="btn primary" onclick="startPaperAnswerReview('${jsA(run.id)}')">開始原卷盲訂正</button></div>` : ''}
     </div>`;
   }).join('');
@@ -6605,8 +6623,9 @@ function renderCorrections() {
     ${completedCards ? `<details class="card" open><summary>已完成的模考三級紀錄</summary><div class="report-list">${completedCards}</div></details>` : ''}`;
 }
 
-/* 原版紙本卷隔日訂正：每次只顯示當前錯題的最終答案；完整詳解仍由答案本負責，且至少保存一次
-   自己的重想方向後才出現第三級按鈕。題目所在單頁同時保留，避免只看答案卻找不到題目。 */
+/* 原版紙本卷兩階段批改：
+   第一次交卷只給對錯、分數與正式答案；隔天至少保存一次自己的重想後，第二顆 AI 按鈕才會解鎖，
+   並只針對當前錯題分析第一個錯誤與完整解法。 */
 let paperReview = null;
 function paperFinalAnswerText(q) {
   if (!q) return '答案資料不存在';
@@ -6618,6 +6637,86 @@ function paperQuestionScanIndex(source, no) {
   if (source.id === 'paper-mock-1') return no <= 5 ? 0 : no <= 8 ? 1 : no <= 11 ? 2 : no <= 14 ? 3 : no <= 17 ? 4 : 5;
   if (source.id === 'paper-mock-2') return no <= 4 ? 0 : no <= 7 ? 1 : no <= 10 ? 2 : no <= 13 ? 3 : no <= 17 ? 4 : 5;
   return no <= 5 ? 0 : no <= 8 ? 1 : no <= 13 ? 2 : 3;
+}
+async function paperReviewPageComposite(page) {
+  if (!paperReview) throw new Error('隔日訂正工作階段不存在');
+  return paperCompositeImage(
+    paperReview.source,
+    paperReview.urls,
+    paperReview.inkPages,
+    page,
+  );
+}
+function paperReviewPaint() {
+  if (!paperReview) return;
+  const no = paperReview.nos[paperReview.i];
+  const scanIndex = paperQuestionScanIndex(paperReview.source, no);
+  const data = paperReview.inkPages && paperReview.inkPages[scanIndex];
+  const inkCanvas = $('#paper-review-ink-canvas');
+  if (inkCanvas && inkCanvas.clientWidth && inkCanvas.clientHeight) {
+    const dpr = window.devicePixelRatio || 1, width = inkCanvas.clientWidth, height = inkCanvas.clientHeight;
+    inkCanvas.width = Math.max(1, Math.round(width * dpr));
+    inkCanvas.height = Math.max(1, Math.round(height * dpr));
+    const ctx = inkCanvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, width, height);
+    for (const stroke of data && Array.isArray(data.s) ? data.s : []) paperInkLine(ctx, stroke, width, height);
+  }
+  const state = paperReview.run.review && paperReview.run.review[no];
+  paperAiPaintCanvas($('#paper-review-ai-canvas'), state && state.aiDetail ? [state.aiDetail] : [], false);
+}
+async function paperAiDetailCall(source, no, imageB64, logs) {
+  const q = source.key[no - 1], answer = paperFinalAnswerText(q);
+  const attempts = (logs || []).map((log, index) => ({
+    attempt: index + 1,
+    direction: String(log.direction || ''),
+    topic: String(TOPICS[log.topic] || log.topic || ''),
+    concept: String(log.concept || ''),
+  }));
+  const content = [{
+    type: 'text',
+    text: `你是台灣學測數學的訂正老師。這是「${source.title}」第 ${no} 題的第二次詳細批改。附圖含原掃描題目、考生考試當天的黑／藍／綠筆跡與右側計算。考生已在隔天看過最終答案並重新嘗試，仍然無法完成。
+
+正式最終答案：${answer}
+題型：${q.type}
+考生隔日重想紀錄：${JSON.stringify(attempts)}
+
+請依序完成：
+1. 先如實轉錄你看見的關鍵作答；看不清楚就明說，不可猜。
+2. 找出考試筆跡或隔日方向中「最早可證明不成立」的一步。若前面不是算錯，而是方向停在缺口，就精確指出缺少的推論；不可假裝看見圖上沒有的式子。
+3. 說明為何錯，接著提供可完整走到正式答案的詳解步驟。
+4. 給一個下次看到相似條件時可立即辨識的短訊號。
+5. marks 只框住第一個錯誤所在的卷面區域；若無法可靠定位，回傳空陣列。label 只寫「第一個錯誤」。
+
+這是第二次詳細批改，現在才可以提供錯誤步驟分析與完整詳解。`,
+  }, {
+    type: 'image',
+    source: { type: 'base64', media_type: 'image/jpeg', data: imageB64 },
+  }];
+  const payload = await openAiInvoke({ responseType: 'paper_detail', messages: [{ role: 'user', content }] }, 90000);
+  if (!payload.json || typeof payload.json !== 'object') throw new Error('OpenAI 沒有回傳完整詳批資料');
+  return { json: payload.json, model: String(payload.model || '') };
+}
+function paperNormalizeAiDetail(source, no, raw, model) {
+  const text = (value, max) => String(value == null ? '' : value).trim().slice(0, max);
+  const marks = (Array.isArray(raw && raw.marks) ? raw.marks : []).slice(0, 2).map((mark) => {
+    const box = Array.isArray(mark && mark.box) ? mark.box.map(Number) : [];
+    if (box.length !== 4 || box.some((n) => !Number.isFinite(n))) return null;
+    return { box: box.map((n) => Math.max(0, Math.min(1, n))), label: '第一個錯誤' };
+  }).filter(Boolean);
+  return {
+    no,
+    model: model || 'gpt-5.5',
+    generatedAt: Date.now(),
+    readable: !!raw && raw.readable !== false,
+    read: text(raw && raw.read, 300),
+    firstError: !raw || raw.firstError == null ? null : text(raw.firstError, 300),
+    errorKind: !raw || raw.errorKind == null ? null : text(raw.errorKind, 80),
+    explanation: text(raw && raw.explanation, 1400),
+    solution: (Array.isArray(raw && raw.solution) ? raw.solution : []).slice(0, 8).map((step) => text(step, 300)).filter(Boolean),
+    answer: paperFinalAnswerText(source.key[no - 1]),
+    nextTime: text(raw && raw.nextTime, 180),
+    marks,
+  };
 }
 async function startPaperAnswerReview(runId) {
   const run = (S.paperRuns || []).find((row) => row && row.id === runId);
@@ -6632,8 +6731,9 @@ async function startPaperAnswerReview(runId) {
   app().innerHTML = `<div class="card"><h1>正在開啟 ${escH(source.title)}</h1><p class="dim">載入原卷，答案仍只會逐題顯示。</p></div>`;
   try {
     const urls = await paperSourceFiles(source);
+    const inkPages = await paperInkLoadAll(run, source);
     const pending = wrongNos.filter((no) => !(run.review[no] && run.review[no].done));
-    paperReview = { run, source, urls, nos: pending.length ? pending : wrongNos, i: 0 };
+    paperReview = { run, source, urls, inkPages, nos: pending.length ? pending : wrongNos, i: 0, detailLoading: false, detailError: '' };
     renderPaperAnswerReview();
   } catch (e) {
     app().innerHTML = `<div class="card warn"><h2>原卷載入失敗</h2><p>${escH((e && e.message) || e)}</p><div class="actr"><button class="btn" onclick="renderCorrections()">返回</button><button class="btn primary" onclick="startPaperAnswerReview('${jsA(runId)}')">重試</button></div></div>`;
@@ -6661,16 +6761,33 @@ function renderPaperAnswerReview() {
   const state = paperReview.run.review[no] = paperReview.run.review[no] || { done: false, attempts: 0, logs: [] };
   const scanIndex = paperQuestionScanIndex(paperReview.source, no), scan = paperReview.source.scans[scanIndex];
   const prior = (state.logs || []).map((log, i) => `<li>第 ${i + 1} 次：${log.direction ? escH(log.direction) : `${escH(TOPICS[log.topic] || '')}／${escH(log.concept || '')}`}</li>`).join('');
+  const detail = state.aiDetail;
+  const detailBlock = detail ? `<div class="paper-detail-result">
+      <span class="eyebrow">第二次批改｜GPT‑5.5 詳細診斷</span>
+      <h2>第一個錯誤</h2>
+      <p class="${detail.firstError ? 'badc' : 'dim'}">${detail.firstError ? rtAi(detail.firstError) : 'AI 無法從目前筆跡可靠定位第一個錯誤；以下改以方向缺口說明。'}</p>
+      ${detail.errorKind ? `<p class="paper-detail-kind">錯誤類型：${escH(detail.errorKind)}</p>` : ''}
+      ${detail.read ? `<details><summary>AI 實際讀到的作答</summary><p>${rtAi(detail.read)}</p></details>` : ''}
+      <h3>為什麼會卡住</h3><div>${rtAi(detail.explanation || '沒有足夠可讀資訊可分析。')}</div>
+      <h3>完整詳解</h3>${detail.solution.length ? `<ol class="paper-detail-steps">${detail.solution.map((step) => `<li>${rtAi(step)}</li>`).join('')}</ol>` : '<p class="warnc">AI 沒有產生足夠的完整步驟，請重試第二次批改。</p>'}
+      <p class="blind-answer">正式答案：<b>${escH(detail.answer)}</b></p>
+      ${detail.nextTime ? `<div class="next-step"><b>下次辨識訊號</b>${rtAi(detail.nextTime)}</div>` : ''}
+      <div class="actr"><button class="btn primary" onclick="paperReviewFinishDetailed()">我已看懂並重算，列為第三級</button><button class="btn" onclick="paperReviewDetailed()" ${paperReview.detailLoading ? 'disabled' : ''}>${paperReview.detailLoading ? '重新詳批中…' : '重新產生第二次詳批'}</button></div>
+    </div>` : '';
+  const detailGate = state.attempts > 0 && !detail ? `<div class="notice paper-detail-gate"><b>已保存至少一次隔日獨立重想。</b><p>只有你再次努力仍無法完成時，才按下面的第二次批改。這一輪會找第一個錯誤並提供完整詳解。</p>
+      <div class="actr"><button id="paper-detail-button" class="btn primary" onclick="paperReviewDetailed()" ${paperReview.detailLoading ? 'disabled' : ''}>${paperReview.detailLoading ? '第二次 AI 詳批中…' : '第二次批改｜AI 找第一個錯誤並詳解'}</button></div>
+      ${paperReview.detailError ? `<p class="warnc">${escH(paperReview.detailError)}</p>` : ''}</div>` : '';
   app().innerHTML = `<div class="session-head"><span>${escH(paperReview.source.title)}｜第 ${no} 題｜${paperReview.i + 1}/${paperReview.nos.length}</span><button class="btn sm" onclick="paperReviewBack()">暫停並返回</button></div>
-    <div class="paper-review-layout"><section class="paper-review-source"><div class="paper-pane-caption"><span>原卷題目所在單頁</span><small>${escH(scan.label)}</small></div><div class="paper-write-sheet paper-review-sheet" data-side="${scan.side}"><div class="paper-question-crop"><img src="${paperReview.urls[scanIndex]}" alt="${escH(paperReview.source.title)}第 ${no} 題所在頁"></div><div class="paper-note-margin" aria-hidden="true"></div></div></section>
-    <section class="paper-review-work card"><span class="eyebrow">現在唯一可看的資料</span><h1>第 ${no} 題</h1><div class="blind-answer"><p>最終答案：<b class="big">${escH(paperFinalAnswerText(q))}</b></p></div>
+    <div class="paper-review-layout"><section class="paper-review-source"><div class="paper-pane-caption"><span>原卷題目與考試當天筆跡</span><small>${escH(scan.label)}</small></div><div class="paper-write-sheet paper-review-sheet" data-side="${scan.side}"><div class="paper-question-crop"><img src="${paperReview.urls[scanIndex]}" alt="${escH(paperReview.source.title)}第 ${no} 題所在頁"></div><div class="paper-note-margin" aria-hidden="true"></div><canvas id="paper-review-ink-canvas" aria-label="考試當天原筆跡"></canvas><canvas id="paper-review-ai-canvas" aria-label="第二次 AI 詳批紅筆標記"></canvas></div></section>
+    <section class="paper-review-work card"><span class="eyebrow">隔日重新嘗試</span><h1>第 ${no} 題</h1><div class="blind-answer"><p>最終答案：<b class="big">${escH(paperFinalAnswerText(q))}</b></p></div>
       ${prior ? `<details><summary>我前面已試過的方向</summary><ol>${prior}</ol></details>` : ''}
-      <div class="correction-fields"><label>我重新嘗試的破題方向<textarea id="paper-review-direction" rows="4" placeholder="寫出第一個具體切入點；不用保證已經算完。"></textarea></label>
+      ${detailBlock || `<div class="correction-fields"><label>我隔天重新計算／嘗試的破題方向<textarea id="paper-review-direction" rows="5" placeholder="把重新計算到哪裡、第一個具體切入點，或卡住的式子寫下來；不用保證已經算完。"></textarea></label>
       <div class="fallback-fields"><label>如果沒有方向，至少判斷所屬單元<select id="paper-review-topic">${visionTopicOptions('')}</select></label><label>可能卡住的單元重點<input id="paper-review-concept" placeholder="例如：條件機率的樣本空間"></label></div></div>
-      <p id="paper-review-msg" class="warnc"></p><div class="actr"><button class="btn primary" onclick="paperReviewComplete(2)">只看答案就算出，列為第二級</button><button class="btn" onclick="paperReviewStuck()">仍沒算出，保存這次方向</button></div>
-      ${state.attempts > 0 ? '<div class="notice"><b>已完成至少一次獨立重想。</b><p>若努力後仍無收穫，現在才去看你提供的答案本詳解並完整重算。</p><div class="actr"><button class="btn" onclick="paperReviewComplete(3)">看答案本詳解並重算完，列為第三級</button></div></div>' : ''}
+      <p id="paper-review-msg" class="warnc"></p><div class="actr"><button class="btn primary" onclick="paperReviewComplete(2)">只看答案就算出，列為第二級</button><button class="btn" onclick="paperReviewStuck()">仍沒算出，保存這次嘗試</button></div>
+      ${detailGate}`}
     </section></div>`;
   sessionChrome(true);
+  paperReviewPaint();
 }
 function paperReviewEffort() {
   if (!paperReview) return null;
@@ -6688,15 +6805,49 @@ function paperReviewStuck() {
   const effort = paperReviewEffort(); if (!effort) return;
   const no = paperReview.nos[paperReview.i], state = paperReview.run.review[no];
   state.logs = state.logs || []; state.logs.push(effort); state.attempts = (state.attempts || 0) + 1;
-  paperReview.run.mt = Date.now(); save(); renderPaperAnswerReview();
+  paperReview.detailError = ''; paperReview.run.mt = Date.now(); save(); renderPaperAnswerReview();
 }
 function paperReviewComplete(level) {
   const effort = paperReviewEffort(); if (!effort) return;
   const no = paperReview.nos[paperReview.i], state = paperReview.run.review[no];
-  if (level === 3 && !(state.attempts > 0)) { const msg = $('#paper-review-msg'); if (msg) msg.textContent = '至少先保存一次獨立重想，才可列為第三級。'; return; }
-  state.logs = state.logs || []; state.logs.push(effort); state.done = true; state.level = level;
-  state.outcome = level === 2 ? 'answer-only' : 'solution'; state.completedAt = Date.now();
+  state.logs = state.logs || []; state.logs.push(effort); state.done = true; state.level = 2;
+  state.outcome = 'answer-only'; state.completedAt = Date.now();
   paperReview.run.mt = Date.now(); save(); paperReview.i++; renderPaperAnswerReview();
+}
+async function paperReviewDetailed() {
+  if (!paperReview || paperReview.detailLoading) return;
+  const review = paperReview;
+  const no = review.nos[review.i], state = review.run.review[no];
+  if (String(review.run.due || '') > today() || !(state && state.attempts > 0)) {
+    const msg = $('#paper-review-msg');
+    if (msg) msg.textContent = '必須到隔天，並先保存至少一次重新嘗試，才可使用第二次 AI 詳批。';
+    return;
+  }
+  review.detailLoading = true; review.detailError = ''; renderPaperAnswerReview();
+  try {
+    const page = paperQuestionScanIndex(review.source, no);
+    const image = await paperReviewPageComposite(page);
+    if (paperReview !== review) return;
+    const response = await paperAiDetailCall(review.source, no, image, state.logs || []);
+    if (paperReview !== review) return;
+    state.aiDetail = paperNormalizeAiDetail(review.source, no, response.json, response.model);
+    state.solutionUnlockedAt = Date.now();
+    review.run.mt = Date.now(); save();
+  } catch (error) {
+    if (paperReview === review) review.detailError = (error && error.message) || String(error);
+  } finally {
+    if (paperReview === review) {
+      review.detailLoading = false;
+      renderPaperAnswerReview();
+    }
+  }
+}
+function paperReviewFinishDetailed() {
+  if (!paperReview) return;
+  const no = paperReview.nos[paperReview.i], state = paperReview.run.review[no];
+  if (!state || !(state.attempts > 0) || !state.aiDetail) return;
+  state.done = true; state.level = 3; state.outcome = 'ai-detail'; state.completedAt = Date.now();
+  paperReview.run.mt = Date.now(); save(); paperReview.i++; paperReview.detailError = ''; renderPaperAnswerReview();
 }
 function startCorrection(batchId) {
   const batch = (S.corrections || []).find((b) => b.id === batchId);
