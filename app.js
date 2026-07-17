@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0717o'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0717p'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -3375,6 +3375,7 @@ function nav(view) {
   stopTicker();
   if (ink) inkStop();
   sessionChrome(false);
+  document.body.dataset.view = view; // 讓各主頁可套用平板專屬資訊密度；作答流程仍由 session-on 接管全螢幕
   document.querySelectorAll('nav button').forEach((b) => {
     const on = b.dataset.view === view;
     b.classList.toggle('active', on);
@@ -3411,7 +3412,7 @@ function renderHome() {
     <button onclick="nav('mock')"><span>模考與破題</span><b>${visionDue ? `${visionDue} 題第二天` : visionPaper ? `眼睛刷題 ${visionPaperDone}/20` : '眼睛刷題 20 題'}</b></button>
     <button onclick="nav('concept')"><span>觀念理解</span><b>${conceptDue} 張待說明</b></button>
   </div>
-  <div class="card"><h2>現在的訓練規則</h2>
+  <div class="card training-rules"><h2>現在的訓練規則</h2>
     <ol>
       <li>十一單元從空白默寫子標題與內容；對答案後隔兩天再測。</li>
       <li>平時只做混合題。只有數據確認某章嚴重斷裂，才短期分章補洞。</li>

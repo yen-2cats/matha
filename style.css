@@ -1004,6 +1004,175 @@ select:focus, textarea:focus, input:focus { outline: 2px solid rgba(117, 103, 92
   .recall-grid, .concept-grid, .new-progress-grid, .vision-summary { grid-template-columns: 1fr; }
   .recall-paper-head { padding-inline: 18px; }
 }
+
+/* ── Galaxy Tab S10 Ultra（14.6"／16:10）──
+   Android 會依顯示縮放把 2960×1848 映成不同 CSS 像素，因此用大平板的可用畫布，
+   而不是綁死單一解析度。橫向充分利用寬度，直向仍保有適合 S Pen 的閱讀與觸控密度。 */
+@media (min-width: 800px) and (max-width: 1600px) and (min-height: 700px) {
+  :root {
+    --tablet-page-max: 1380px;
+    --tablet-gutter: clamp(28px, 3.4vw, 52px);
+  }
+  body {
+    min-height: 100dvh;
+    font-size: 16px;
+    line-height: 1.75;
+    padding-bottom: max(40px, env(safe-area-inset-bottom));
+  }
+  .nav-shell {
+    max-width: var(--tablet-page-max);
+    min-height: 72px;
+    padding-inline: var(--tablet-gutter);
+    gap: clamp(24px, 2.5vw, 38px);
+  }
+  .brand { min-height: 48px; gap: 11px; }
+  .brand-mark { width: 34px; height: 34px; padding: 6px; }
+  .brand-copy b { font-size: 17px; }
+  .brand-copy small { display: inline; font-size: 11px; }
+  nav { gap: 6px; padding-block: 9px; }
+  nav button {
+    min-width: 0;
+    min-height: 48px;
+    padding: 10px clamp(10px, 1.1vw, 16px);
+    font-size: 13.5px;
+  }
+  nav button .ui-icon { width: 18px; height: 18px; }
+  #app {
+    width: 100%;
+    max-width: var(--tablet-page-max);
+    padding: 32px var(--tablet-gutter) 82px;
+  }
+  h1 { font-size: clamp(30px, 3vw, 38px); margin-bottom: 20px; }
+  h2 { font-size: 20px; }
+  h3 { font-size: 13px; }
+  .hero { padding: 12px 3px 22px; margin-bottom: 22px; }
+  .hero h1 { font-size: clamp(38px, 4vw, 48px); }
+  .hero p { font-size: 16px; }
+  .card { padding: 24px 26px; margin-block: 16px; }
+  .btn {
+    min-height: 48px;
+    padding: 10px 17px;
+    font-size: 15px;
+  }
+  .btn.big { min-height: 54px; padding: 13px 23px; font-size: 17px; }
+  .btn.sm { min-height: 44px; padding: 8px 13px; font-size: 13.5px; }
+  select, textarea, input[type="text"], input[type="email"], input[type="password"], input[type="number"] {
+    min-height: 48px;
+    padding: 11px 13px;
+    font-size: 16px;
+  }
+  textarea { line-height: 1.65; }
+  .next-action { gap: 30px; padding: 28px 30px; }
+  .next-action h2 { font-size: clamp(24px, 2.4vw, 31px); }
+  .next-action .btn { min-width: 172px; }
+  .task-strip { gap: 14px; margin-block: 18px; }
+  .task-strip button {
+    min-height: 108px;
+    padding: 18px 20px;
+    font-size: 16px;
+    touch-action: manipulation;
+  }
+  .task-strip span { font-size: 13px; }
+  .training-rules { padding-block: 26px; }
+  .training-rules ol { margin-top: 10px; }
+  .training-rules li { padding-left: 3px; margin-block: 7px; break-inside: avoid; }
+  .recall-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+  .recall-tile { min-height: 164px; padding: 19px; }
+  .recall-tile strong { font-size: 18px; }
+  .concept-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+  .concept-tile { min-height: 148px; padding: 18px; }
+  .training-choice { gap: 18px; }
+  .choice-card { min-height: 365px; padding: 28px; }
+  .choice-card h2, .paper-library-head h2 { font-size: 27px; }
+  .paper-library { margin-top: 34px; padding-top: 28px; }
+  .paper-library-head { gap: 34px; margin-bottom: 18px; }
+  .paper-source-grid { gap: 14px; }
+  .paper-source-card { min-height: 224px; padding: 20px; }
+  .paper-source-card h3 { font-size: 21px; }
+  .feedback-grid { gap: 15px; }
+  .new-progress-grid { gap: 14px; margin-block: 18px 22px; }
+  .new-progress-grid section { min-height: 140px; padding: 19px; }
+  .new-progress-grid b { font-size: 28px; }
+  .report-row { grid-template-columns: 120px minmax(0, 1fr) auto; min-height: 62px; padding-block: 12px; }
+  .tbl th, .tbl td { padding: 12px 14px; }
+  .modal-card {
+    width: min(640px, calc(100vw - 64px));
+    max-width: 640px;
+    max-height: calc(100dvh - 64px);
+    padding: 28px 30px;
+    overflow-y: auto;
+  }
+  .modal-card:has(.notes-scroll) { max-width: 860px; }
+  .modal-btns .btn { min-height: 50px; }
+  #day-counter { top: 84px; right: max(18px, env(safe-area-inset-right)); }
+  #syncpill { right: max(22px, env(safe-area-inset-right)); bottom: max(22px, env(safe-area-inset-bottom)); min-height: 44px; }
+
+  /* 原卷與 S Pen 工作台：所有常用控制保持 48px，工具列不浪費大螢幕。 */
+  .paper-workbar {
+    min-height: 64px;
+    grid-template-columns: minmax(210px, .8fr) auto minmax(580px, 1.5fr);
+    gap: 16px;
+    padding: 8px 18px;
+  }
+  .paper-work-title b { font-size: 14px; }
+  .paper-work-title small { font-size: 12px; }
+  .paper-icon-btn, .paper-ink-tools button { min-width: 48px; min-height: 48px; }
+  .paper-timer { min-width: 112px; font-size: 23px; }
+  .paper-page-label { min-width: 142px; }
+  .paper-page-label b { font-size: 15px; }
+  .paper-page-label small { max-width: 175px; font-size: 12px; }
+  .paper-ink-tools {
+    grid-template-columns: repeat(4, minmax(88px, 126px)) minmax(176px, 210px) minmax(220px, 270px);
+    gap: 7px;
+    padding: 9px 12px;
+  }
+  .paper-ink-tools button { font-size: 13px; }
+  .paper-pen-width { min-height: 48px; padding-inline: 12px; }
+  .paper-page-viewport { padding: 18px 20px 30px; }
+  .paper-write-sheet { max-width: 1240px; }
+  .paper-write-hint { max-width: 1240px; margin-top: 10px; font-size: 12px; }
+  .paper-finish-bar { min-height: 66px; padding: 9px 18px; }
+  .paper-finish-bar span { font-size: 13.5px; }
+  .paper-finish-bar .btn { min-height: 48px; }
+  .paper-review-layout { grid-template-columns: minmax(0, 1.35fr) minmax(420px, .65fr); gap: 18px; }
+}
+
+@media (min-width: 1100px) and (max-width: 1600px) and (min-height: 700px) and (orientation: landscape) {
+  .training-rules ol { columns: 2; column-gap: 52px; }
+  .paper-scan-stack { max-width: 1280px; }
+  .concept-prompt { max-width: 980px; }
+}
+
+@media (min-width: 800px) and (max-width: 1100px) and (min-height: 900px) and (orientation: portrait) {
+  :root { --tablet-gutter: clamp(28px, 4vw, 40px); }
+  #app { padding-top: 28px; }
+  .nav-shell { gap: 18px; }
+  nav { justify-content: space-between; }
+  nav button { padding-inline: 9px; }
+  .next-action { grid-template-columns: 1fr; gap: 18px; }
+  .next-action .btn { width: 100%; }
+  .recall-grid, .concept-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .paper-source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .paper-source-grid > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .paper-source-grid > :last-child:nth-child(odd) .btn { width: min(320px, 100%); align-self: flex-end; }
+  .paper-workbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 14px;
+    padding: 8px 12px;
+  }
+  .paper-workbar > .paper-timer, .paper-workbar > .paper-result-score { grid-column: 2; grid-row: 1; }
+  .paper-workgroup.right { grid-column: 1 / -1; justify-content: flex-end; }
+  .paper-ink-tools {
+    grid-template-columns: repeat(4, minmax(74px, 1fr)) minmax(170px, 1.35fr);
+  }
+  .paper-color-group { grid-column: 5; }
+  .paper-pen-width { grid-column: 1 / -1; }
+  .paper-page-viewport { padding-inline: 12px; }
+  .paper-review-layout { grid-template-columns: 1fr; }
+  .paper-review-source { max-height: 56dvh; }
+  .paper-review-work { position: static; }
+}
+
 @media print {
   .site-header, .report-head .actr, #syncpill { display: none !important; }
   body, main { background: #fff !important; }

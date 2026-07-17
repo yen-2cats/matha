@@ -41,6 +41,19 @@ test('低彩度設計 token 與 PWA 主題色一致', () => {
   assert.equal(manifest.theme_color, '#75675c');
 });
 
+test('Galaxy Tab S10 Ultra 橫直向版面使用大平板斷點與至少 48px 主觸控區', () => {
+  const css = read('style.css');
+  const source = read('app.js');
+  assert.match(css, /Galaxy Tab S10 Ultra/);
+  assert.match(css, /@media \(min-width: 800px\) and \(max-width: 1600px\) and \(min-height: 700px\)/);
+  assert.match(css, /--tablet-page-max:\s*1380px/);
+  assert.match(css, /\.btn\s*\{[\s\S]*?min-height:\s*48px/);
+  assert.match(css, /\.paper-icon-btn,\s*\.paper-ink-tools button\s*\{\s*min-width:\s*48px;\s*min-height:\s*48px/);
+  assert.match(css, /orientation: portrait[\s\S]*?\.recall-grid,\s*\.concept-grid\s*\{\s*grid-template-columns:\s*repeat\(3/);
+  assert.match(css, /orientation: portrait[\s\S]*?\.paper-source-grid\s*\{\s*grid-template-columns:\s*repeat\(2/);
+  assert.match(source, /document\.body\.dataset\.view = view/);
+});
+
 test('AI 回饋欄位統一經數學字串修復後再渲染', () => {
   const source = read('app.js');
   const unsafeAiEscapes = [
