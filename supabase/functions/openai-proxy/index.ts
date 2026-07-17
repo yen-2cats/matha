@@ -168,6 +168,35 @@ const responseSchemas = {
       "nextPrompt",
     ],
   },
+  paper_grade: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      questions: {
+        type: "array",
+        minItems: 1,
+        maxItems: 20,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            no: { type: "integer", minimum: 1, maximum: 20 },
+            page: { type: "integer", minimum: 1, maximum: 6 },
+            read: { type: "string", maxLength: 120 },
+            status: {
+              type: "string",
+              enum: ["correct", "incorrect", "unanswered", "uncertain"],
+            },
+            points: { type: "number", minimum: 0, maximum: 10 },
+            marks: { type: "array", maxItems: 3, items: markSchema },
+          },
+          required: ["no", "page", "read", "status", "points", "marks"],
+        },
+      },
+      note: { type: "string", maxLength: 160 },
+    },
+    required: ["questions", "note"],
+  },
 };
 
 function normalizeMessages(raw: unknown) {
@@ -323,16 +352,28 @@ Deno.serve(async (req: Request) => {
     const body = JSON.parse(raw || "{}");
     const responseType = String(body.responseType || "");
     if (
-      !["grade", "process", "outline", "concept", "text", "test"].includes(
+      ![
+        "grade",
+        "process",
+        "outline",
+        "concept",
+        "paper_grade",
+        "text",
+        "test",
+      ].includes(
         responseType,
       )
     ) return reply(origin, 400, { message: "responseType 不合法" });
 
     const model = "gpt-5.5";
     const isTest = responseType === "test";
-    const isStructured = ["grade", "process", "outline", "concept"].includes(
-      responseType,
-    );
+    const isStructured = [
+      "grade",
+      "process",
+      "outline",
+      "concept",
+      "paper_grade",
+    ].includes(responseType);
     const instructions = isTest ? "Reply with exactly OK." : String(
       body.instructions ||
         (isStructured ? "依照 JSON Schema 回覆，不要增加 schema 外欄位。" : ""),
@@ -346,7 +387,11 @@ Deno.serve(async (req: Request) => {
       model,
       instructions,
       input,
-      max_output_tokens: isTest ? 32 : (isStructured ? 3500 : 3000),
+      max_output_tokens: isTest
+        ? 32
+        : responseType === "paper_grade"
+        ? 5000
+        : (isStructured ? 3500 : 3000),
       reasoning: { effort: isTest ? "none" : "medium" },
       store: false,
       safety_identifier: await safetyIdentifier(userId),
@@ -358,7 +403,12 @@ Deno.serve(async (req: Request) => {
             name: `matha_${responseType}`,
             strict: true,
             schema: responseSchemas[
-              responseType as "grade" | "process" | "outline" | "concept"
+              responseType as
+                | "grade"
+                | "process"
+                | "outline"
+                | "concept"
+                | "paper_grade"
             ],
           },
         }
