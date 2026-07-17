@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0717m'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0717n'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const KEY = 'mathA13';
@@ -3262,9 +3262,9 @@ function exitFlow(view) {
   }
   if (sessionMode === 'paper-grade' && paperSourceSession) {
     const { source, run } = paperSourceSession;
-    modal(`<h2>要暫停今天的批分嗎？</h2><p>${escH(source.title)}仍在「今天只批分」階段。可保存目前填寫的分數、錯題號與備註草稿，之後再回來完成。</p>`, [
-      ['繼續批分', null, 'primary'],
-      ['保存草稿，離開', () => { paperSourceSaveDraft(); endSession(); nav(goto); }],
+    modal(`<h2>AI 還在看這一整回</h2><p>${escH(source.title)}正在依題本上的筆跡批改。現在離開不會刪除筆跡；下次開啟會重新檢查尚未完成的批改。</p>`, [
+      ['留在這裡等批改', null, 'primary'],
+      ['先離開，稍後再試', () => { run.status = 'grading'; run.mt = Date.now(); save(); endSession(); nav(goto); }],
       ['捨棄本回', () => { paperSourceDiscard(run.id); endSession(); nav(goto); }],
     ]);
     return;
@@ -3351,7 +3351,12 @@ window.addEventListener('beforeunload', (e) => {
 // 真正離開／重載時才落盤；beforeunload 可能被使用者取消，不能在那裡把仍在畫面的倒數永久凍住。
 window.addEventListener('pagehide', () => {
   if (sessionMode === 'paper-source' && paperSourceSession) paperSourcePause();
-  else if (sessionMode === 'paper-grade' && paperSourceSession) paperSourceSaveDraft();
+  else if (sessionMode === 'paper-grade' && paperSourceSession) {
+    paperSourceSession.run.status = 'grading';
+    paperSourceSession.run.resumeAt = null;
+    paperSourceSession.run.mt = Date.now();
+    save();
+  }
 });
 try { history.pushState({ guard: 1 }, ''); } catch (e) {}
 window.addEventListener('popstate', () => {
@@ -5151,7 +5156,7 @@ function paperSourceCardHTML(source) {
   let status = '尚未作答';
   let button = '開啟原版整回';
   if (active) {
-    if (active.status === 'grading') { status = '今日批分尚未完成'; button = '繼續今日批分'; }
+    if (active.status === 'grading') { status = 'AI 批改尚未完成'; button = '繼續 AI 批改'; }
     else { status = `已保留進度｜剩餘 ${fmtClock(paperRunLeft(active))}`; button = '繼續這一回'; }
   } else if (latest && ['awaiting-key', 'awaiting-correction'].includes(latest.status)) {
     status = `${latest.score}/100｜錯 ${Array.isArray(latest.wrongNos) ? latest.wrongNos.length : 0} 題｜${String(latest.due || '') <= today() ? '已到隔日訂正' : `鎖到 ${latest.due}`}`;
@@ -5160,7 +5165,7 @@ function paperSourceCardHTML(source) {
     status = `${latest.score}/100｜原卷訂正已完成`;
     button = '再寫一回';
   }
-  return `<section class="paper-source-card"><div><span class="eyebrow">私有原卷｜${source.questions} 題・${source.minutes} 分鐘</span><h3>${escH(source.title)}</h3><p>${escH(status)}</p><small>高解析單頁、題上書寫留白與數位答案卡；筆跡先存本機，登入後同步。</small></div><button class="btn${active ? ' primary' : ''}" onclick="startPaperSource('${jsA(source.id)}')">${button}</button></section>`;
+  return `<section class="paper-source-card"><div><span class="eyebrow">私有原卷｜${source.questions} 題・${source.minutes} 分鐘</span><h3>${escH(source.title)}</h3><p>${escH(status)}</p><small>直接在高解析題本上作答；交卷後 GPT‑5.5 讀取整份筆跡，以紅筆圈記並批分。</small></div><button class="btn${active ? ' primary' : ''}" onclick="startPaperSource('${jsA(source.id)}')">${button}</button></section>`;
 }
 function renderMockIntro() {
   const n = S.mocks.length;
@@ -5438,7 +5443,15 @@ async function startPaperSource(sourceId) {
     if (run.status === 'active') run.resumeAt = Date.now();
     run.mt = Date.now(); save();
     const savedPage = Number(run.paperPage);
-    paperSourceSession = { source, run, urls, inkPages, page: Number.isFinite(savedPage) ? savedPage : 0, zoom: 1, inkMode: 'pen', inkWidth: paperInkWidthValue(run.paperInkWidth) };
+    const inkColor = PAPER_INK_COLORS[run.paperInkColor] ? run.paperInkColor : 'black';
+    paperSourceSession = {
+      source, run, urls, inkPages,
+      page: Number.isFinite(savedPage) ? savedPage : 0,
+      zoom: 1,
+      inkMode: 'pen',
+      inkWidth: paperInkWidthValue(run.paperInkWidth),
+      inkColor,
+    };
     paperSourceSession.page = Math.max(0, Math.min(source.scans.length - 1, paperSourceSession.page));
     sessionActive = true; sessionMode = run.status === 'grading' ? 'paper-grade' : 'paper-source';
     if (run.status === 'grading' || paperRunLeft(run) <= 0) paperSourceGrade(run.status === 'grading' ? '繼續今天的批分' : '時間到');
@@ -5460,6 +5473,12 @@ const PAPER_ZOOM_MIN = .75;
 const PAPER_ZOOM_MAX = 4;
 const PAPER_INK_WIDTH_MIN = .35;
 const PAPER_INK_WIDTH_MAX = 2;
+const PAPER_INK_COLORS = {
+  black: '#343a36',
+  blue: '#315f78',
+  green: '#4f7158',
+};
+const PAPER_AI_RED = '#b43b32';
 function paperInkQid(run, page) { return `paper:${run.id}:v${PAPER_LAYOUT_VERSION}:${page}`; }
 async function paperInkLoadAll(run, source) {
   const pages = {};
@@ -5533,7 +5552,8 @@ function paperInkMarkDirty() {
 }
 function paperInkLine(ctx, stroke, width, height) {
   if (!stroke || stroke.dead || !Array.isArray(stroke.pts) || stroke.pts.length < 2) return;
-  ctx.strokeStyle = '#343a36'; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = PAPER_INK_COLORS[stroke.c] || PAPER_INK_COLORS.black;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   const pressure = Number(stroke.pts.reduce((sum, p) => sum + (Number(p[2]) || .5), 0) / stroke.pts.length);
   ctx.lineWidth = (1.35 + Math.max(.15, pressure) * 1.5) * paperInkWidthValue(stroke.w);
   ctx.beginPath(); ctx.moveTo(stroke.pts[0][0] * width, stroke.pts[0][1] * height);
@@ -5550,6 +5570,52 @@ function paperInkPaint() {
   const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, width, height);
   for (const stroke of data.s) paperInkLine(ctx, stroke, width, height);
   if (paperSourceSession.inkCurrent) paperInkLine(ctx, paperSourceSession.inkCurrent, width, height);
+  paperAiPaint();
+}
+function paperAiPageQuestions(page) {
+  const result = paperSourceSession && paperSourceSession.run && paperSourceSession.run.aiGrade;
+  return result && Array.isArray(result.questions)
+    ? result.questions.filter((item) => Number(item && item.page) === Number(page) + 1)
+    : [];
+}
+function paperAiPaint() {
+  const cv = $('#paper-ai-canvas');
+  if (!cv || !paperSourceSession || !cv.clientWidth || !cv.clientHeight) return;
+  const dpr = window.devicePixelRatio || 1, width = cv.clientWidth, height = cv.clientHeight;
+  if (cv.width !== Math.round(width * dpr) || cv.height !== Math.round(height * dpr)) {
+    cv.width = Math.max(1, Math.round(width * dpr));
+    cv.height = Math.max(1, Math.round(height * dpr));
+  }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  ctx.strokeStyle = PAPER_AI_RED;
+  ctx.fillStyle = PAPER_AI_RED;
+  ctx.lineWidth = Math.max(2, width / 520);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.font = `700 ${Math.max(14, Math.min(25, width / 46))}px system-ui, sans-serif`;
+  for (const item of paperAiPageQuestions(paperSourceSession.page)) {
+    for (const mark of Array.isArray(item.marks) ? item.marks : []) {
+      const box = Array.isArray(mark && mark.box) ? mark.box.map(Number) : [];
+      if (box.length !== 4 || box.some((n) => !Number.isFinite(n))) continue;
+      const left = Math.max(0, Math.min(1, Math.min(box[0], box[2]))) * width;
+      const top = Math.max(0, Math.min(1, Math.min(box[1], box[3]))) * height;
+      const right = Math.max(0, Math.min(1, Math.max(box[0], box[2]))) * width;
+      const bottom = Math.max(0, Math.min(1, Math.max(box[1], box[3]))) * height;
+      ctx.strokeRect(left, top, Math.max(8, right - left), Math.max(8, bottom - top));
+      const label = String(mark.label || '').slice(0, 16);
+      if (!label) continue;
+      const metrics = ctx.measureText(label), pad = 5;
+      const labelWidth = metrics.width + pad * 2, labelHeight = Math.max(22, width / 35);
+      const labelX = Math.min(Math.max(0, left), Math.max(0, width - labelWidth));
+      const labelY = top >= labelHeight + 3 ? top - labelHeight - 3 : Math.min(height - labelHeight, bottom + 3);
+      ctx.fillRect(labelX, labelY, labelWidth, labelHeight);
+      ctx.fillStyle = '#fffdf8';
+      ctx.fillText(label, labelX + pad, labelY + labelHeight * .72);
+      ctx.fillStyle = PAPER_AI_RED;
+    }
+  }
 }
 function paperInkPoint(e, cv) {
   const rect = cv.getBoundingClientRect();
@@ -5599,6 +5665,13 @@ function paperPinchBegin(cv) {
     pane,
   };
 }
+function paperTouchPageDelta(touch) {
+  if (!touch || touch.swipeBlocked) return 0;
+  const dx = Number(touch.x) - Number(touch.startX);
+  const dy = Number(touch.y) - Number(touch.startY);
+  if (Math.abs(dx) < 72 || Math.abs(dx) < Math.abs(dy) * 1.25) return 0;
+  return dx < 0 ? 1 : -1;
+}
 function paperInkDown(e) {
   if (!paperSourceSession) return;
   const cv = e.currentTarget;
@@ -5607,13 +5680,23 @@ function paperInkDown(e) {
     if (paperSourceSession.inkPointer != null) return;
     try { cv.setPointerCapture(e.pointerId); } catch (_) {}
     paperSourceSession.inkTouches = paperSourceSession.inkTouches || new Map();
-    paperSourceSession.inkTouches.set(e.pointerId, { id: e.pointerId, x: e.clientX, y: e.clientY });
+    const touch = {
+      id: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      startX: e.clientX,
+      startY: e.clientY,
+      swipeBlocked: false,
+    };
+    paperSourceSession.inkTouches.set(e.pointerId, touch);
     if (paperSourceSession.inkTouches.size >= 2) {
+      for (const item of paperSourceSession.inkTouches.values()) item.swipeBlocked = true;
       paperSourceSession.inkTouch = null;
       if (!paperSourceSession.inkPinch) paperSourceSession.inkPinch = paperPinchBegin(cv);
-    } else paperSourceSession.inkTouch = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    } else paperSourceSession.inkTouch = touch;
     return;
   }
+  if (paperSourceSession.readOnly) return;
   if (!['pen', 'mouse'].includes(e.pointerType || 'mouse')) return;
   if (e.pointerType === 'pen') {
     paperSourceSession.sPenLastAt = Date.now();
@@ -5629,14 +5712,22 @@ function paperInkDown(e) {
     if (paperInkPenHasContact(e)) paperInkEraseAt(e, cv);
     return;
   }
-  paperSourceSession.inkCurrent = { t0: Date.now(), w: paperInkWidthValue(paperSourceSession.inkWidth), pts: [paperInkPoint(e, cv)] };
+  paperSourceSession.inkCurrent = {
+    t0: Date.now(),
+    w: paperInkWidthValue(paperSourceSession.inkWidth),
+    c: PAPER_INK_COLORS[paperSourceSession.inkColor] ? paperSourceSession.inkColor : 'black',
+    pts: [paperInkPoint(e, cv)],
+  };
 }
 function paperInkMove(e) {
   if (!paperSourceSession) return;
   if (e.pointerType === 'touch') {
     const touches = paperSourceSession.inkTouches;
     if (!touches || !touches.has(e.pointerId) || paperSourceSession.inkPointer != null) return;
-    touches.set(e.pointerId, { id: e.pointerId, x: e.clientX, y: e.clientY });
+    const tracked = touches.get(e.pointerId);
+    const previousX = tracked.x, previousY = tracked.y;
+    tracked.x = e.clientX; tracked.y = e.clientY;
+    if (paperSourceSession.zoom > 1.05) tracked.swipeBlocked = true;
     const pinch = paperSourceSession.inkPinch;
     if (pinch) {
       const a = touches.get(pinch.ids[0]), b = touches.get(pinch.ids[1]);
@@ -5654,7 +5745,7 @@ function paperInkMove(e) {
     if (!touch || touch.id !== e.pointerId) return;
     e.preventDefault();
     const pane = e.currentTarget.closest('.paper-page-viewport');
-    const dx = e.clientX - touch.x, dy = e.clientY - touch.y; touch.x = e.clientX; touch.y = e.clientY;
+    const dx = e.clientX - previousX, dy = e.clientY - previousY;
     if (pane) { pane.scrollLeft -= dx; pane.scrollTop -= dy; }
     return;
   }
@@ -5669,7 +5760,14 @@ function paperInkMove(e) {
     paperInkCommitCurrent();
     paperSourceSession.inkGestureMode = nextMode;
     paperInkModeRender(nextMode, paperInkGestureIsTemporaryErase());
-    if (nextMode === 'pen') paperSourceSession.inkCurrent = { t0: Date.now(), w: paperInkWidthValue(paperSourceSession.inkWidth), pts: [paperInkPoint(e, cv)] };
+    if (nextMode === 'pen') {
+      paperSourceSession.inkCurrent = {
+        t0: Date.now(),
+        w: paperInkWidthValue(paperSourceSession.inkWidth),
+        c: PAPER_INK_COLORS[paperSourceSession.inkColor] ? paperSourceSession.inkColor : 'black',
+        pts: [paperInkPoint(e, cv)],
+      };
+    }
   }
   if (paperSourceSession.inkGestureMode === 'erase') {
     if (paperInkPenHasContact(e)) paperInkEraseAt(e, cv);
@@ -5688,14 +5786,25 @@ function paperInkUp(e) {
   if (!paperSourceSession) return;
   if (e.pointerType === 'touch') {
     const touches = paperSourceSession.inkTouches;
+    const touch = touches && touches.get(e.pointerId);
+    const wasPinching = !!paperSourceSession.inkPinch;
     if (touches) touches.delete(e.pointerId);
-    if (paperSourceSession.inkPinch) {
+    if (wasPinching) {
       paperSourceSession.inkPinch = touches && touches.size >= 2 ? paperPinchBegin(e.currentTarget) : null;
       if (touches && touches.size === 1) {
         const remaining = [...touches.values()][0];
-        paperSourceSession.inkTouch = { ...remaining };
+        remaining.startX = remaining.x;
+        remaining.startY = remaining.y;
+        remaining.swipeBlocked = true;
+        paperSourceSession.inkTouch = remaining;
       } else paperSourceSession.inkTouch = null;
-    } else if (paperSourceSession.inkTouch && paperSourceSession.inkTouch.id === e.pointerId) paperSourceSession.inkTouch = null;
+    } else if (paperSourceSession.inkTouch && paperSourceSession.inkTouch.id === e.pointerId) {
+      paperSourceSession.inkTouch = null;
+      if (e.type === 'pointerup') {
+        const delta = paperTouchPageDelta(touch);
+        if (delta) paperWorkspacePage(delta);
+      }
+    }
     return;
   }
   if (e.pointerType === 'pen') paperSourceSession.sPenLastAt = Date.now();
@@ -5710,7 +5819,12 @@ function paperInkAttach() {
   paperSourceSession.inkTouches = new Map(); paperSourceSession.inkTouch = null; paperSourceSession.inkPinch = null; paperSourceSession.inkGestureMode = null;
   cv.onpointerdown = paperInkDown; cv.onpointermove = paperInkMove;
   cv.onpointerup = cv.onpointercancel = cv.onlostpointercapture = paperInkUp;
-  cv.oncontextmenu = paperInkContextMenu; paperInkPaint(); paperInkModeSet(paperSourceSession.inkMode || 'pen');
+  cv.oncontextmenu = paperInkContextMenu;
+  paperInkPaint();
+  if (!paperSourceSession.readOnly) {
+    paperInkModeSet(paperSourceSession.inkMode || 'pen');
+    paperInkColorSet(paperSourceSession.inkColor || 'black');
+  }
 }
 function paperInkPenErasePressed(e) {
   return sPenErasePressed(e);
@@ -5783,6 +5897,24 @@ function paperInkWidthSet(percent) {
   }
   const label = $('#paper-pen-width-label'); if (label) label.textContent = `${Math.round(width * 100)}%`;
 }
+function paperInkColorSet(color) {
+  if (!paperSourceSession || !PAPER_INK_COLORS[color]) return;
+  paperSourceSession.inkColor = color;
+  if (paperSourceSession.run) {
+    paperSourceSession.run.paperInkColor = color;
+    paperSourceSession.run.mt = Date.now();
+    clearTimeout(paperStateSaveTimer); paperStateSaveTimer = setTimeout(save, 300);
+  }
+  for (const key of Object.keys(PAPER_INK_COLORS)) {
+    const button = $(`#paper-color-${key}`);
+    if (button) {
+      const selected = key === color;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    }
+  }
+  paperInkModeSet('pen');
+}
 function paperInkUndo() {
   const data = paperInkPage(); if (!data) return;
   const stroke = [...data.s].reverse().find((item) => item && !item.dead); if (!stroke) return;
@@ -5796,9 +5928,12 @@ function paperInkClear() {
 }
 function paperWorkspacePage(delta) {
   if (!paperSourceSession) return;
-  paperInkPersist(true);
-  paperSourceSession.page = Math.max(0, Math.min(paperSourceSession.source.scans.length - 1, paperSourceSession.page + delta));
+  if (!paperSourceSession.readOnly) paperInkPersist(true);
+  const nextPage = Math.max(0, Math.min(paperSourceSession.source.scans.length - 1, paperSourceSession.page + delta));
+  if (nextPage === paperSourceSession.page) return false;
+  paperSourceSession.page = nextPage;
   paperSourceSession.run.paperPage = paperSourceSession.page; paperSourceSession.run.mt = Date.now(); save(); renderPaperSource();
+  return true;
 }
 function paperWorkspaceZoom(delta) {
   if (!paperSourceSession) return;
@@ -5817,106 +5952,137 @@ function paperWorkspaceSetZoom(value, focus) {
   }
   clearTimeout(paperZoomPaintTimer); paperZoomPaintTimer = setTimeout(paperInkPaint, 35);
 }
-function paperAnswerCount(source, run) {
-  let n = 0;
-  for (let no = 1; no <= source.questions; no++) {
-    const a = (run.answers || {})[no];
-    if (a && (a.type === 'fill' ? String(a.v || '').trim() : a.type === 'multi' ? Array.isArray(a.v) && a.v.length : Number.isInteger(a.v))) n++;
-  }
-  return n;
-}
-function paperAnswerSheetHTML(source, run) {
-  const answers = run.answers || {};
-  const rows = source.key.map((q, index) => {
-    const no = index + 1, a = answers[no] || null;
-    let control = '';
-    if (q.type === 'single') {
-      control = `<div class="paper-choice-row">${[0, 1, 2, 3, 4].map((opt) => `<button type="button" class="paper-choice${a && a.v === opt ? ' selected' : ''}" aria-pressed="${a && a.v === opt ? 'true' : 'false'}" onclick="paperAnswerSingle(${no},${opt})">${opt + 1}</button>`).join('')}</div>`;
-    } else if (q.type === 'multi') {
-      const chosen = new Set(a && Array.isArray(a.v) ? a.v : []);
-      control = `<div class="paper-choice-row multi">${[0, 1, 2, 3, 4].map((opt) => `<button type="button" class="paper-choice${chosen.has(opt) ? ' selected' : ''}" aria-pressed="${chosen.has(opt) ? 'true' : 'false'}" onclick="paperAnswerMulti(${no},${opt})">${opt + 1}</button>`).join('')}</div>`;
-    } else {
-      control = `<input class="paper-fill-answer" inputmode="text" autocomplete="off" value="${escH(a && a.type === 'fill' ? a.v : '')}" placeholder="輸入最終答案" oninput="paperAnswerFill(${no},this.value)">`;
-    }
-    return `<div class="paper-answer-row"><b>${no}</b><span class="paper-answer-kind">${q.type === 'single' ? '單選' : q.type === 'multi' ? '多選' : '填答'}</span>${control}</div>`;
-  }).join('');
-  return `<div class="paper-answer-head"><div><span class="eyebrow">只記錄作答，不顯示對錯</span><h2>${escH(source.title)}答案卡</h2></div><b id="paper-answer-progress">${paperAnswerCount(source, run)} / ${source.questions}</b></div><div id="paper-answer-body" class="paper-answer-body">${rows}</div>`;
-}
-function paperAnswerOpen() {
-  if (!paperSourceSession) return;
-  const { source, run } = paperSourceSession;
-  modal(`<div class="paper-answer-modal">${paperAnswerSheetHTML(source, run)}</div>`, [['收起答案卡', null, 'primary']]);
-}
-function paperAnswerRefresh() {
-  if (!paperSourceSession) return;
-  const body = $('#paper-answer-body');
-  if (body) body.innerHTML = paperAnswerSheetHTML(paperSourceSession.source, paperSourceSession.run).match(/<div id="paper-answer-body" class="paper-answer-body">([\s\S]*)<\/div>$/)[1];
-  const progress = $('#paper-answer-progress');
-  if (progress) progress.textContent = `${paperAnswerCount(paperSourceSession.source, paperSourceSession.run)} / ${paperSourceSession.source.questions}`;
-}
-function paperAnswerScheduleSave() {
-  if (!paperSourceSession) return;
-  paperSourceSession.run.mt = Date.now();
-  clearTimeout(paperStateSaveTimer); paperStateSaveTimer = setTimeout(save, 300);
-  const badge = $('#paper-answer-badge'); if (badge) badge.textContent = paperAnswerCount(paperSourceSession.source, paperSourceSession.run);
-}
-function paperAnswerSingle(no, opt) {
-  if (!paperSourceSession) return;
-  const answers = paperSourceSession.run.answers = paperSourceSession.run.answers || {};
-  answers[no] = answers[no] && answers[no].v === opt ? null : { type: 'single', v: opt };
-  if (!answers[no]) delete answers[no]; paperAnswerScheduleSave(); paperAnswerRefresh();
-}
-function paperAnswerMulti(no, opt) {
-  if (!paperSourceSession) return;
-  const answers = paperSourceSession.run.answers = paperSourceSession.run.answers || {};
-  const chosen = new Set(answers[no] && Array.isArray(answers[no].v) ? answers[no].v : []);
-  if (chosen.has(opt)) chosen.delete(opt); else chosen.add(opt);
-  if (chosen.size) answers[no] = { type: 'multi', v: [...chosen].sort((a, b) => a - b) }; else delete answers[no];
-  paperAnswerScheduleSave(); paperAnswerRefresh();
-}
-function paperAnswerFill(no, value) {
-  if (!paperSourceSession) return;
-  const answers = paperSourceSession.run.answers = paperSourceSession.run.answers || {};
-  if (String(value).trim()) answers[no] = { type: 'fill', v: String(value).slice(0, 80) }; else delete answers[no];
-  paperAnswerScheduleSave();
-  const progress = $('#paper-answer-progress'); if (progress) progress.textContent = `${paperAnswerCount(paperSourceSession.source, paperSourceSession.run)} / ${paperSourceSession.source.questions}`;
-}
-function paperAnswerGradeItem(q, a) {
-  if (!a) return { ok: false, points: 0 };
-  let ok = false;
-  if (q.type === 'single') ok = a.type === 'single' && a.v === q.ans[0];
-  else if (q.type === 'multi') {
-    const chosen = Array.isArray(a.v) ? a.v : [];
-    ok = chosen.length === q.ans.length && q.ans.every((x) => chosen.includes(x));
-  } else ok = a.type === 'fill' && checkFill(a.v, q.ans);
-  let points = ok ? q.points : 0;
-  if (q.type === 'multi' && !ok) {
-    const chosen = new Set(Array.isArray(a.v) ? a.v : []), correct = new Set(q.ans);
-    let errors = 0; for (let i = 0; i < 5; i++) if (chosen.has(i) !== correct.has(i)) errors++;
-    points = Math.max(0, q.points * ((5 - 2 * errors) / 5));
-  }
-  return { ok, points: Math.round(points * 100) / 100 };
-}
-function paperGradePreview(source, run) {
-  let score = 0, entered = 0; const wrongNos = [], detail = [];
-  source.key.forEach((q, index) => {
-    const no = index + 1, a = (run.answers || {})[no] || null, result = paperAnswerGradeItem(q, a);
-    if (a) entered++; if (!result.ok) wrongNos.push(no); score += result.points;
-    detail.push({ no, answered: !!a, ok: result.ok, points: result.points });
+function paperImageLoad(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('題本影像無法載入'));
+    image.src = url;
   });
-  return { score: Math.round(score * 100) / 100, entered, wrongNos, detail };
+}
+async function paperPageComposite(page) {
+  if (!paperSourceSession) throw new Error('原卷工作階段不存在');
+  const { source, urls } = paperSourceSession, scan = source.scans[page];
+  const image = await paperImageLoad(urls[page]);
+  const width = 1536, height = Math.round(width * 2535 / 2112);
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fffefa'; ctx.fillRect(0, 0, width, height);
+  const crop = { x: width * .03, y: height * .025, w: width * .708, h: height * .94 };
+  const half = image.naturalWidth / 2, sourceX = scan.side === 'right' ? half : 0;
+  ctx.filter = 'grayscale(.92) contrast(1.1) brightness(1.035)';
+  ctx.drawImage(image, sourceX, 0, half, image.naturalHeight, crop.x, crop.y, crop.w, crop.h);
+  ctx.filter = 'none';
+  const marginX = width * .756;
+  ctx.strokeStyle = '#d5d0c7'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(marginX, height * .03); ctx.lineTo(marginX, height * .97); ctx.stroke();
+  ctx.strokeStyle = 'rgba(122,112,100,.16)';
+  for (let y = height * .08; y < height * .96; y += height * .017) {
+    ctx.beginPath(); ctx.moveTo(marginX + 8, y); ctx.lineTo(width * .975, y); ctx.stroke();
+  }
+  const data = paperInkPage(page);
+  for (const stroke of data && Array.isArray(data.s) ? data.s : []) paperInkLine(ctx, stroke, width, height);
+  return canvas.toDataURL('image/jpeg', .9).split(',')[1];
+}
+function paperGradePromptKey(source) {
+  return source.key.map((q, index) => ({
+    no: index + 1,
+    page: paperQuestionScanIndex(source, index + 1) + 1,
+    type: q.type,
+    answer: paperFinalAnswerText(q),
+    points: q.points,
+  }));
+}
+async function paperAiGradeCall(source, pages) {
+  const key = paperGradePromptKey(source);
+  const content = [{
+    type: 'text',
+    text: `你是台灣學測數學閱卷老師。接下來依序附上「${source.title}」的 ${pages.length} 張單頁題本；每張已把原掃描題目、考生在題目上與右側留白寫的黑／藍／綠筆跡合成。請直接讀取題本上的作答，不存在另外的答案卡。
+
+正式答案與配分：${JSON.stringify(key)}
+
+批改規則：
+1. questions 必須恰好回傳第 1 到 ${source.questions} 題，每題一次；page 必須依上面對照。
+2. 只把考生自己寫的黑／藍／綠筆跡視為作答。印刷題目不是作答，右側留白也可能有最後答案。
+3. 單選與填答答對得該題滿分，答錯或未答 0 分；等價分數、根式、小數形式可算對。
+4. 多選依五個選項逐一判定：全對 5 分、錯 1 個選項 3 分、錯 2 個選項 1 分、錯 3 個以上 0 分。
+5. status：正確 correct、錯誤 incorrect、沒有作答 unanswered、筆跡真的無法辨識 uncertain。不要為了湊答案而猜。
+6. 每題用 marks 框住考生的最終答案或作答區，座標是該張完整單頁的 [左,上,右,下] 0–1 比例。只做閱卷紅筆標記，不提供正解、詳解、提示或訂正方向。
+7. label 只可使用「✓ +分數」「✕ 0」「△ +部分分」「未作答」「看不清楚」這類短標記。
+8. read 記錄你實際辨識到的考生答案，供系統稽核；note 只記錄整體辨識風險，不要寫解法。`,
+  }];
+  pages.forEach((b64, index) => {
+    content.push({ type: 'text', text: `【完整單頁 ${index + 1}／${pages.length}】` });
+    content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } });
+  });
+  const payload = await openAiInvoke({ responseType: 'paper_grade', messages: [{ role: 'user', content }] }, 90000);
+  if (!payload.json || typeof payload.json !== 'object') throw new Error('OpenAI 沒有回傳完整批改資料');
+  return { json: payload.json, model: String(payload.model || '') };
+}
+function paperFallbackMark(source, no, page, label) {
+  const pageNos = source.key.map((_, index) => index + 1)
+    .filter((itemNo) => paperQuestionScanIndex(source, itemNo) + 1 === page);
+  const index = Math.max(0, pageNos.indexOf(no));
+  const y = .09 + index * (.78 / Math.max(1, pageNos.length));
+  return { box: [.77, y, .97, Math.min(.96, y + .055)], label };
+}
+function paperNormalizeAiGrade(source, raw, model) {
+  const incoming = Array.isArray(raw && raw.questions) ? raw.questions : [];
+  const byNo = new Map();
+  for (const item of incoming) {
+    const no = Number(item && item.no);
+    if (Number.isInteger(no) && no >= 1 && no <= source.questions && !byNo.has(no)) byNo.set(no, item);
+  }
+  if (byNo.size !== source.questions) throw new Error(`AI 只完成 ${byNo.size}/${source.questions} 題，請重新批改`);
+  const questions = source.key.map((q, index) => {
+    const no = index + 1, item = byNo.get(no), page = paperQuestionScanIndex(source, no) + 1;
+    const allowed = new Set(['correct', 'incorrect', 'unanswered', 'uncertain']);
+    const status = allowed.has(item.status) ? item.status : 'uncertain';
+    let points = Number(item.points);
+    if (status === 'correct') points = q.points;
+    else if (status === 'unanswered' || status === 'uncertain' || q.type !== 'multi') points = 0;
+    else {
+      const allowedPartial = [0, q.points * .2, q.points * .6];
+      points = allowedPartial.reduce((best, value) => Math.abs(value - points) < Math.abs(best - points) ? value : best, 0);
+    }
+    points = Math.max(0, Math.min(q.points, Math.round(points * 100) / 100));
+    const label = status === 'correct' ? `✓ +${points}`
+      : status === 'incorrect' && points > 0 ? `△ +${points}`
+      : status === 'incorrect' ? '✕ 0'
+      : status === 'unanswered' ? '未作答' : '看不清楚';
+    const marks = (Array.isArray(item.marks) ? item.marks : []).slice(0, 2).map((mark) => {
+      const box = Array.isArray(mark && mark.box) ? mark.box.map(Number) : [];
+      if (box.length !== 4 || box.some((n) => !Number.isFinite(n))) return null;
+      return { box: box.map((n) => Math.max(0, Math.min(1, n))), label };
+    }).filter(Boolean);
+    return {
+      no, page, status, points,
+      read: String(item.read || '').slice(0, 120),
+      marks: marks.length ? marks : [paperFallbackMark(source, no, page, label)],
+    };
+  });
+  const score = Math.round(questions.reduce((sum, item) => sum + item.points, 0) * 100) / 100;
+  return {
+    model: model || 'gpt-5.5',
+    gradedAt: Date.now(),
+    score,
+    wrongNos: questions.filter((item) => item.status !== 'correct').map((item) => item.no),
+    uncertainNos: questions.filter((item) => item.status === 'uncertain').map((item) => item.no),
+    questions,
+  };
 }
 function renderPaperSource() {
   if (!paperSourceSession) return renderMockIntro();
+  if (paperSourceSession.readOnly) return renderPaperGradeResult();
   const { source, run, urls } = paperSourceSession;
   const left = paperRunLeft(run), page = paperSourceSession.page, scan = source.scans[page];
-  const answered = paperAnswerCount(source, run);
   app().innerHTML = `<div class="paper-session-shell">
-    <div class="paper-workbar"><div class="paper-workgroup"><button class="paper-icon-btn" onclick="paperWorkspacePage(-1)" ${page <= 0 ? 'disabled' : ''} aria-label="上一頁">${uiIcon('arrow-left')}</button><span class="paper-page-label"><b>${page + 1} / ${source.scans.length}</b><small>${escH(scan.label)}</small></span><button class="paper-icon-btn" onclick="paperWorkspacePage(1)" ${page >= source.scans.length - 1 ? 'disabled' : ''} aria-label="下一頁">${uiIcon('arrow-right')}</button></div>
+    <div class="paper-workbar"><div class="paper-work-title"><b>${escH(source.title)}</b><small>單指左右滑動翻頁</small></div>
       <span id="paper-clock" class="timer paper-timer">${fmtClock(left)}</span>
-      <div class="paper-workgroup right"><button class="paper-icon-btn" onclick="paperWorkspaceZoom(-.25)" aria-label="縮小題本">−</button><span id="paper-zoom-label" class="paper-zoom-label">${Math.round(paperSourceSession.zoom * 100)}%</span><button class="paper-icon-btn" onclick="paperWorkspaceZoom(.25)" aria-label="放大題本">＋</button><button class="paper-answer-button" onclick="paperAnswerOpen()">${uiIcon('numbers')}<span>答案卡</span><b id="paper-answer-badge">${answered}</b></button><button class="paper-icon-btn" onclick="exitFlow()" aria-label="離開">${uiIcon('x')}</button></div></div>
-    <div class="paper-workspace"><section class="paper-source-pane"><div class="paper-pane-caption"><span>清晰單頁・可直接在題目上寫</span><small id="paper-ink-status">筆跡自動保存</small></div><div class="paper-ink-tools"><button id="paper-tool-pen" onclick="paperInkModeSet('pen')">${uiIcon('pencil')}筆</button><button id="paper-tool-erase" onclick="paperInkModeSet('erase')">${uiIcon('erase')}橡皮擦</button><button onclick="paperInkUndo()">${uiIcon('undo')}復原</button><button onclick="paperInkClear()">${uiIcon('x')}清空本頁筆跡</button><label class="paper-pen-width" for="paper-pen-width"><span>筆粗 <b id="paper-pen-width-label">${Math.round(paperInkWidthValue(paperSourceSession.inkWidth) * 100)}%</b></span><input id="paper-pen-width" type="range" min="35" max="200" step="5" value="${Math.round(paperInkWidthValue(paperSourceSession.inkWidth) * 100)}" oninput="paperInkWidthSet(this.value)" aria-label="調整畫筆粗細"></label></div><div class="paper-page-viewport"><div id="paper-write-sheet" class="paper-write-sheet" data-side="${scan.side}" style="width:${paperSourceSession.zoom * 100}%;max-width:${1180 * paperSourceSession.zoom}px"><div class="paper-question-crop"><img id="paper-source-image" src="${urls[page]}" alt="${escH(source.title)} ${escH(scan.label)}"></div><div class="paper-note-margin" aria-hidden="true"></div><canvas id="paper-ink-canvas" aria-label="可直接書寫的題本頁"></canvas></div><p class="paper-write-hint">觸控筆直接書寫；S Pen 側鍵按住時暫時變成橡皮擦，放開立即回到原本的筆。單指拖動畫面，雙指可縮放並移動；放大後可用「筆粗」把線條調細。</p></div></section></div>
-    <div class="paper-finish-bar"><span>${source.questions} 題・${source.minutes} 分鐘｜已填答案 ${answered} 題</span><button class="btn primary" onclick="paperSourceGrade('主動交卷')">交卷，今天只批分</button></div></div>`;
+      <div class="paper-workgroup right"><button class="paper-icon-btn" onclick="paperWorkspaceZoom(-.25)" aria-label="縮小題本">−</button><span id="paper-zoom-label" class="paper-zoom-label">${Math.round(paperSourceSession.zoom * 100)}%</span><button class="paper-icon-btn" onclick="paperWorkspaceZoom(.25)" aria-label="放大題本">＋</button><span class="paper-page-label"><b>${page + 1} / ${source.scans.length}</b><small>${escH(scan.label)}</small></span><button class="paper-icon-btn" onclick="paperWorkspacePage(-1)" ${page <= 0 ? 'disabled' : ''} aria-label="上一頁">${uiIcon('arrow-left')}</button><button class="paper-icon-btn" onclick="paperWorkspacePage(1)" ${page >= source.scans.length - 1 ? 'disabled' : ''} aria-label="下一頁">${uiIcon('arrow-right')}</button><button class="paper-icon-btn" onclick="exitFlow()" aria-label="離開">${uiIcon('x')}</button></div></div>
+    <div class="paper-workspace"><section class="paper-source-pane"><div class="paper-pane-caption"><span>清晰單頁・直接在原卷作答</span><small id="paper-ink-status">筆跡自動保存</small></div><div class="paper-ink-tools"><button id="paper-tool-pen" onclick="paperInkModeSet('pen')">${uiIcon('pencil')}筆</button><button id="paper-tool-erase" onclick="paperInkModeSet('erase')">${uiIcon('erase')}橡皮擦</button><button onclick="paperInkUndo()">${uiIcon('undo')}復原</button><button onclick="paperInkClear()">${uiIcon('x')}清空本頁</button><div class="paper-color-group" role="group" aria-label="畫筆顏色"><button id="paper-color-black" class="paper-color-button" onclick="paperInkColorSet('black')" aria-label="黑色筆" aria-pressed="${paperSourceSession.inkColor === 'black'}"><i style="--ink:${PAPER_INK_COLORS.black}"></i><span>黑</span></button><button id="paper-color-blue" class="paper-color-button" onclick="paperInkColorSet('blue')" aria-label="藍色筆" aria-pressed="${paperSourceSession.inkColor === 'blue'}"><i style="--ink:${PAPER_INK_COLORS.blue}"></i><span>藍</span></button><button id="paper-color-green" class="paper-color-button" onclick="paperInkColorSet('green')" aria-label="綠色筆" aria-pressed="${paperSourceSession.inkColor === 'green'}"><i style="--ink:${PAPER_INK_COLORS.green}"></i><span>綠</span></button></div><label class="paper-pen-width" for="paper-pen-width"><span>筆粗 <b id="paper-pen-width-label">${Math.round(paperInkWidthValue(paperSourceSession.inkWidth) * 100)}%</b></span><input id="paper-pen-width" type="range" min="35" max="200" step="5" value="${Math.round(paperInkWidthValue(paperSourceSession.inkWidth) * 100)}" oninput="paperInkWidthSet(this.value)" aria-label="調整畫筆粗細"></label></div><div class="paper-page-viewport"><div id="paper-write-sheet" class="paper-write-sheet" data-side="${scan.side}" style="width:${paperSourceSession.zoom * 100}%;max-width:${1180 * paperSourceSession.zoom}px"><div class="paper-question-crop"><img id="paper-source-image" src="${urls[page]}" alt="${escH(source.title)} ${escH(scan.label)}"></div><div class="paper-note-margin" aria-hidden="true"></div><canvas id="paper-ink-canvas" aria-label="可直接書寫並左右滑動翻頁的題本頁"></canvas><canvas id="paper-ai-canvas" aria-hidden="true"></canvas></div><p class="paper-write-hint">S Pen 直接書寫；側鍵按住時暫時變橡皮擦，放開立即恢復。手指左右滑動翻頁；放大後單指移動頁面，雙指縮放。AI 交卷後才會用獨立紅筆層批改。</p></div></section></div>
+    <div class="paper-finish-bar"><span>${source.questions} 題・${source.minutes} 分鐘｜答案直接寫在卷面，不另填答案卡</span><button class="btn primary" onclick="paperSourceGrade('主動交卷')">交卷，AI 紅筆批改</button></div></div>`;
   sessionChrome(true);
   paperInkAttach();
   startTicker(() => {
@@ -5932,16 +6098,6 @@ function paperSourcePause() {
   paperInkPersist(true);
   run.remainingMs = paperRunLeft(run); run.resumeAt = null; run.status = 'paused'; run.mt = Date.now(); save();
 }
-function paperSourceSaveDraft() {
-  if (!paperSourceSession) return;
-  const run = paperSourceSession.run;
-  run.gradeDraft = {
-    score: String((($('#paper-score') || {}).value || '')).trim().slice(0, 8),
-    wrong: String((($('#paper-wrong') || {}).value || '')).trim().slice(0, 120),
-    note: String((($('#paper-note') || {}).value || '')).trim().slice(0, 500),
-  };
-  run.status = 'grading'; run.resumeAt = null; run.mt = Date.now(); save();
-}
 function paperSourceDiscard(runId) {
   const run = (S.paperRuns || []).find((item) => item && item.id === runId);
   if (run) {
@@ -5955,53 +6111,92 @@ function paperSourceDiscard(runId) {
   S.extMocks = (S.extMocks || []).filter((row) => row && row.paperRunId !== runId);
   save();
 }
-function paperSourceGrade(reason) {
-  if (!paperSourceSession) return;
-  stopTicker();
-  const { source, run, urls } = paperSourceSession;
-  paperInkPersist(true);
-  run.remainingMs = paperRunLeft(run); run.resumeAt = null; run.status = 'grading'; run.gradeReason = reason; run.mt = Date.now(); save();
-  sessionMode = 'paper-grade';
-  const used = Math.max(0, source.minutes - Math.round(run.remainingMs / 60000));
-  const preview = paperGradePreview(source, run), hasDigitalAnswers = preview.entered > 0;
-  const draft = run.gradeDraft || {};
-  const scoreValue = run.score == null ? (draft.score !== undefined && draft.score !== '' ? draft.score : hasDigitalAnswers ? preview.score : '') : run.score;
-  const wrongValue = (run.wrongNos || []).length ? run.wrongNos.join('、') : draft.wrong || (hasDigitalAnswers ? preview.wrongNos.join('、') : '');
-  app().innerHTML = `<div class="session-head"><span>${escH(source.title)}｜今日只批分</span><button class="btn sm xbtn" onclick="exitFlow()" title="離開">✕</button></div>
-    <div class="card"><h1>${escH(reason)}</h1><p>作答約 <b>${used} 分鐘</b>。${hasDigitalAnswers ? `答案卡已填 ${preview.entered}/${source.questions} 題，系統已依正式答案與多選部分給分規則完成初批。` : '這回沒有使用數位答案卡，請依紙本答案手動登錄。'}<b>今天只批分，不訂正。</b></p>
-      <div class="notice"><b>答案與詳解今天仍然鎖住。</b><p>這裡只顯示分數與錯題號；最終答案要到明天才逐題開放，讓你重新找一次破題方向。</p></div>
-      <div class="paper-grade-fields"><label>總分（0–100）<input id="paper-score" class="ans-input" type="number" min="0" max="100" inputmode="decimal" value="${escH(scoreValue)}" placeholder="例如 63"></label>
-      <label>錯題號（用空格、逗號或頓號分隔）<input id="paper-wrong" class="ans-input" inputmode="numeric" value="${escH(wrongValue)}" placeholder="例如 3、7、12、18"></label>
-      <label>今天只留給明天看的備註（選填）<textarea id="paper-note" rows="2" placeholder="例如：第 18–20 題沒寫完；今天先不看詳解。">${escH(run.note || (run.gradeDraft || {}).note || '')}</textarea></label></div>
-      <p id="paper-grade-msg" class="warnc"></p><div class="actr"><button class="btn primary big" onclick="paperSourceSaveGrade()">保存批分，鎖到明天</button></div></div>
-    <details class="card"><summary>需要核對題號時展開原卷</summary><div class="paper-scan-stack compact">${urls.map((url, i) => `<figure class="paper-scan"><img src="${url}" alt="${escH(source.title)}${escH(source.scans[i].label)}"><figcaption><span>${escH(source.scans[i].label)}</span><a href="${url}" target="_blank" rel="noopener">放大原頁</a></figcaption></figure>`).join('')}</div></details>`;
+function paperSourceRecordGrade(source, run, grade) {
+  run.aiGrade = grade;
+  run.score = grade.score;
+  run.wrongNos = grade.wrongNos;
+  run.note = grade.uncertainNos.length ? `AI 看不清楚：${grade.uncertainNos.join('、')}` : '';
+  run.gradeDraft = null;
+  run.status = 'awaiting-correction';
+  run.submittedAt = Date.now();
+  run.due = addDays(today(), 1);
+  run.mt = Date.now();
+  S.extMocks = S.extMocks || [];
+  const record = {
+    id: `external-${run.id}`, paperRunId: run.id, sourceId: source.id, d: run.d || today(), ts: run.submittedAt,
+    name: source.title, score: grade.score, total: 100, minutesLeft: Math.max(0, Math.round(run.remainingMs / 60000)),
+    topics: [], err: '', note: `${grade.wrongNos.length ? `錯題 ${grade.wrongNos.join('、')}` : '全對'}${run.note ? `｜${run.note}` : ''}`,
+  };
+  const existing = S.extMocks.findIndex((item) => item && item.paperRunId === run.id);
+  if (existing >= 0) S.extMocks[existing] = { ...S.extMocks[existing], ...record };
+  else S.extMocks.push(record);
+  save();
+}
+function paperSourceGradeLoading(source, reason, progress, error) {
+  app().innerHTML = `<div class="paper-grade-loading card${error ? ' warn' : ''}"><span class="eyebrow">GPT‑5.5 整卷視覺批改</span><h1>${error ? '這次批改沒有完成' : escH(reason)}</h1><p id="paper-grade-progress">${escH(progress)}</p>
+    ${error ? `<p class="warnc">${escH(error)}</p><div class="actr"><button class="btn" onclick="exitFlow()">先離開</button><button class="btn primary" onclick="paperSourceGrade('重新批改')">重新批改整份原卷</button></div>` : '<div class="paper-grade-pulse" aria-hidden="true"><span></span></div><p class="dim">正在辨識卷面上的黑、藍、綠筆跡並逐題核分。今天不會顯示正解或詳解。</p>'}
+    <small>${escH(source.title)}｜請保持此頁開啟；即使失敗，原筆跡也不會消失。</small></div>`;
   sessionChrome(true);
 }
-function paperSourceSaveGrade() {
-  if (!paperSourceSession) return;
-  const { source, run } = paperSourceSession;
-  const score = Number((($('#paper-score') || {}).value || '').trim());
-  const raw = ((($('#paper-wrong') || {}).value || '').trim());
-  const wrongNos = [...new Set(raw.split(/[\s,，、;；]+/).filter(Boolean).map(Number))].sort((a, b) => a - b);
-  const msg = $('#paper-grade-msg');
-  if (!Number.isFinite(score) || score < 0 || score > 100) { if (msg) msg.textContent = '總分請填 0 到 100。'; return; }
-  if (wrongNos.some((n) => !Number.isInteger(n) || n < 1 || n > source.questions)) { if (msg) msg.textContent = `錯題號只能填 1 到 ${source.questions}。`; return; }
-  if (score < 100 && !wrongNos.length) { if (msg) msg.textContent = '分數未滿 100 時，請至少留下錯題號，明天才能訂正。'; return; }
-  const note = ((($('#paper-note') || {}).value || '')).trim().slice(0, 500);
-  run.score = score; run.wrongNos = wrongNos; run.note = note; run.gradeDraft = null; run.status = 'awaiting-correction'; run.submittedAt = Date.now();
-  run.due = addDays(today(), 1); run.mt = Date.now();
-  S.extMocks = S.extMocks || [];
-  if (!S.extMocks.some((m) => m.paperRunId === run.id)) S.extMocks.push({
-    id: `external-${run.id}`, paperRunId: run.id, sourceId: source.id, d: today(), ts: run.submittedAt,
-    name: source.title, score, total: 100, minutesLeft: Math.max(0, Math.round(run.remainingMs / 60000)),
-    topics: [], err: '', note: `${wrongNos.length ? `錯題 ${wrongNos.join('、')}` : '全對'}${note ? `｜${note}` : ''}`,
-  });
-  save();
-  sessionActive = false; sessionMode = null; sessionChrome(false);
+async function paperSourceGrade(reason) {
+  if (!paperSourceSession || paperSourceSession.grading) return;
+  stopTicker();
+  const session = paperSourceSession, { source, run } = session;
+  session.grading = true;
+  await paperInkPersist(true);
+  run.remainingMs = paperRunLeft(run); run.resumeAt = null; run.status = 'grading'; run.gradeReason = reason; run.mt = Date.now(); save();
+  sessionMode = 'paper-grade';
+  paperSourceGradeLoading(source, reason, `正在整理第 1 / ${source.scans.length} 頁…`);
+  try {
+    const pages = [];
+    for (let page = 0; page < source.scans.length; page++) {
+      const progress = $('#paper-grade-progress');
+      if (progress) progress.textContent = `正在整理第 ${page + 1} / ${source.scans.length} 頁…`;
+      pages.push(await paperPageComposite(page));
+    }
+    const progress = $('#paper-grade-progress');
+    if (progress) progress.textContent = `已送出 ${source.scans.length} 頁，正在逐題辨識與核分…`;
+    const response = await paperAiGradeCall(source, pages);
+    const grade = paperNormalizeAiGrade(source, response.json, response.model);
+    if (run.status === 'discarded') return;
+    paperSourceRecordGrade(source, run, grade);
+    if (paperSourceSession === session) {
+      session.grading = false;
+      session.readOnly = true;
+      session.page = 0;
+      session.zoom = 1;
+      sessionMode = 'paper-result';
+      sessionActive = false;
+      renderPaperGradeResult();
+    }
+  } catch (error) {
+    run.status = 'grading'; run.resumeAt = null; run.mt = Date.now(); save();
+    if (paperSourceSession === session) {
+      session.grading = false;
+      paperSourceGradeLoading(source, '批改未完成', '原筆跡已保留，可以直接重試。', (error && error.message) || String(error));
+    }
+  }
+}
+function renderPaperGradeResult() {
+  if (!paperSourceSession) return renderMockIntro();
+  const { source, run, urls } = paperSourceSession, grade = run.aiGrade;
+  if (!grade) return paperSourceGradeLoading(source, '批改未完成', '找不到完整批改結果，請重新批改。', '批改資料尚未完成');
+  const page = paperSourceSession.page, scan = source.scans[page];
+  const uncertain = Array.isArray(grade.uncertainNos) ? grade.uncertainNos : [];
+  app().innerHTML = `<div class="paper-session-shell is-graded">
+    <div class="paper-workbar"><div class="paper-work-title"><b>GPT‑5.5 紅筆批改</b><small>${escH(source.title)}</small></div><strong class="paper-result-score">${grade.score} / 100</strong>
+      <div class="paper-workgroup right"><button class="paper-icon-btn" onclick="paperWorkspaceZoom(-.25)" aria-label="縮小題本">−</button><span id="paper-zoom-label" class="paper-zoom-label">${Math.round(paperSourceSession.zoom * 100)}%</span><button class="paper-icon-btn" onclick="paperWorkspaceZoom(.25)" aria-label="放大題本">＋</button><span class="paper-page-label"><b>${page + 1} / ${source.scans.length}</b><small>${escH(scan.label)}</small></span><button class="paper-icon-btn" onclick="paperWorkspacePage(-1)" ${page <= 0 ? 'disabled' : ''} aria-label="上一頁">${uiIcon('arrow-left')}</button><button class="paper-icon-btn" onclick="paperWorkspacePage(1)" ${page >= source.scans.length - 1 ? 'disabled' : ''} aria-label="下一頁">${uiIcon('arrow-right')}</button><button class="paper-icon-btn" onclick="paperSourceCloseResult()" aria-label="關閉批改結果">${uiIcon('x')}</button></div></div>
+    <div class="paper-workspace"><section class="paper-source-pane"><div class="paper-pane-caption"><span>你的原筆跡＋AI 紅筆標記</span><small>單指左右滑動翻頁・雙指縮放</small></div><div class="paper-page-viewport"><div id="paper-write-sheet" class="paper-write-sheet" data-side="${scan.side}" style="width:${paperSourceSession.zoom * 100}%;max-width:${1180 * paperSourceSession.zoom}px"><div class="paper-question-crop"><img id="paper-source-image" src="${urls[page]}" alt="${escH(source.title)} ${escH(scan.label)}"></div><div class="paper-note-margin" aria-hidden="true"></div><canvas id="paper-ink-canvas" aria-label="可左右滑動查看 AI 紅筆批改的題本頁"></canvas><canvas id="paper-ai-canvas" aria-label="AI 紅筆批改標記"></canvas></div><p class="paper-write-hint">紅框與短記號只顯示本題得分狀態，不會在交卷當天洩漏正解、詳解或提示。明天才進入只看答案的盲訂正。</p></div></section></div>
+    <div class="paper-finish-bar paper-result-bar"><span>錯題：${grade.wrongNos.length ? grade.wrongNos.join('、') : '無'}${uncertain.length ? `｜看不清楚：${uncertain.join('、')}` : ''}｜答案鎖到 ${run.due}</span><button class="btn primary" onclick="paperSourceCloseResult()">完成，回模考入口</button></div></div>`;
+  sessionChrome(true);
+  paperInkAttach();
+}
+function paperSourceCloseResult() {
+  sessionActive = false;
+  sessionMode = null;
+  sessionChrome(false);
   paperSourceRelease();
-  app().innerHTML = `<h1>今日批分已保存</h1><div class="card good"><p class="big">${escH(source.title)}：<b>${score}/100</b></p><p>錯題號：<b>${wrongNos.length ? wrongNos.join('、') : '無'}</b></p>
-    <div class="warn"><b>鎖到 ${run.due}。</b>明天系統才會逐題顯示最終答案；先重想方向，努力後仍無收穫才進到詳解階段。</div>
-    <div class="actr"><button class="btn" onclick="nav('mock')">回模考與破題</button><button class="btn primary" onclick="nav('home')">回今日</button></div></div>`;
+  nav('mock');
 }
 let mock = null;
 function buildPaper(forVision) {
