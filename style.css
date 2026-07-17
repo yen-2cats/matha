@@ -887,6 +887,9 @@ select:focus, textarea:focus, input:focus { outline: 2px solid rgba(117, 103, 92
 .paper-write-hint { width: min(100%, 1180px); margin: 8px auto 0; color: #6f6961; font-size: 11px; text-align: center; }
 #paper-ink-canvas { position: absolute; inset: 0; z-index: 1; display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; user-select: none; -webkit-user-select: none; }
 #paper-ai-canvas { position: absolute; inset: 0; z-index: 2; display: block; width: 100%; height: 100%; pointer-events: none; }
+#paper-review-ink-canvas, #paper-review-ai-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; pointer-events: none; }
+#paper-review-ink-canvas { z-index: 1; }
+#paper-review-ai-canvas { z-index: 2; }
 #paper-ink-canvas[data-mode="erase"] { cursor: cell; }
 .paper-session-shell.is-graded #paper-ink-canvas { cursor: grab; }
 .paper-finish-bar { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 8px 14px; background: rgba(251, 250, 247, .98); border-top: 1px solid var(--border); box-shadow: 0 -2px 12px rgba(52, 47, 42, .08); }
@@ -905,6 +908,14 @@ select:focus, textarea:focus, input:focus { outline: 2px solid rgba(117, 103, 92
 .paper-review-source .paper-question-crop img { position: absolute; top: 0; display: block; width: 200%; height: 100%; max-width: none; object-fit: fill; margin: 0; }
 .paper-review-work { position: sticky; top: 12px; margin: 0; }
 .paper-review-work h1 { margin-top: 6px; }
+.paper-detail-gate { margin-top: 16px; border-color: #b8aa98; }
+.paper-detail-gate .btn { width: 100%; }
+.paper-detail-result { display: grid; gap: 10px; }
+.paper-detail-result h2, .paper-detail-result h3 { margin: 5px 0 0; }
+.paper-detail-result h3 { padding-top: 10px; border-top: 1px solid var(--border); font-size: 16px; }
+.paper-detail-kind { width: fit-content; margin: 0; padding: 4px 8px; border: 1px solid #d7b8b2; border-radius: 999px; color: #8f332d; background: #f6e9e6; font-size: 12px; }
+.paper-detail-steps { display: grid; gap: 9px; margin: 0; padding-left: 24px; }
+.paper-detail-result .blind-answer { margin: 4px 0 0; }
 
 @media (max-width: 900px), (orientation: portrait) {
   .paper-workbar { grid-template-columns: 1fr auto; min-height: 56px; }
