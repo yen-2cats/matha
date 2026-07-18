@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0718j'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0718k'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const LEGACY_KEY = 'mathA13';
@@ -5362,6 +5362,37 @@ function paperSourceCardHTML(source) {
     : '<p class="paper-calibration-note">完整 20 題，可列入級分校準。</p>';
   return `<section class="paper-source-card${source.calibrationEligible === false ? ' is-practice' : ''}"><div><span class="eyebrow">私有原卷｜${source.questions} 題・${source.minutes} 分鐘</span><h3>${escH(source.title)}</h3><p>${escH(status)}</p>${calibration}<small>直接在高解析題本上作答；交卷後 GPT‑5.5 讀取整份筆跡，以紅筆圈記並批分。</small></div>${actions}</section>`;
 }
+function paperRunDisplayDate(run) {
+  const saved = String(run && run.d || '');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(saved)) return saved;
+  const ts = Number(run && (run.submittedAt || run.createdAt || run.mt));
+  return Number.isFinite(ts) && ts > 0
+    ? new Date(ts + 8 * 3600000).toISOString().slice(0, 10)
+    : '';
+}
+function paperRunHistoryHTML() {
+  const runs = (S.paperRuns || []).filter((run) => run && run.aiGrade && run.status !== 'discarded')
+    .sort((a, b) => Number(b.submittedAt || b.createdAt || b.mt || 0) - Number(a.submittedAt || a.createdAt || a.mt || 0));
+  const rows = runs.map((run) => {
+    const source = paperSourceById(run.sourceId);
+    const date = paperRunDisplayDate(run);
+    const wrong = Array.isArray(run.wrongNos) ? run.wrongNos.length : Number(run.aiGrade && run.aiGrade.wrongNos && run.aiGrade.wrongNos.length) || 0;
+    const due = String(run.due || '');
+    const dueNow = ['awaiting-key', 'awaiting-correction'].includes(run.status) && /^\d{4}-\d{2}-\d{2}$/.test(due) && due <= today();
+    const stage = run.status === 'completed'
+      ? '訂正完成'
+      : dueNow
+        ? '可開始隔日訂正'
+        : ['awaiting-key', 'awaiting-correction'].includes(run.status)
+          ? due ? `隔日訂正鎖到 ${due}` : '等待隔日訂正'
+          : '第一次批改完成';
+    return `<article class="paper-history-row"><div class="paper-history-date"><span>作答日期</span><time datetime="${escH(date)}">${escH(date || '日期未記錄')}</time></div>
+      <div class="paper-history-main"><b>${escH(run.name || source && source.title || '原版模考')}</b><span>${Number(run.score ?? run.aiGrade.score) || 0}/100｜錯 ${wrong} 題｜${escH(stage)}</span></div>
+      <div class="paper-history-actions"><button class="btn sm" onclick="openPaperGradeResult('${jsA(run.id)}')">查看紅筆卷</button><button class="btn sm" onclick="renderPaperTeacherReport('${jsA(run.id)}')">逐題紀錄</button>${dueNow ? `<button class="btn sm primary" onclick="startPaperAnswerReview('${jsA(run.id)}')">隔日訂正</button>` : ''}</div></article>`;
+  }).join('');
+  return `<section class="paper-history" aria-labelledby="paper-history-title"><div class="paper-history-head"><div><span class="eyebrow">自動保存日期、分數與批改結果</span><h3 id="paper-history-title">原卷作答歷史</h3></div><b>${runs.length} 回</b></div>
+    ${rows ? `<div class="paper-history-list">${rows}</div>` : '<p class="paper-history-empty">完成第一次 AI 批改後，這裡會自動留下作答日期、卷別、分數與紅筆批改卷。</p>'}</section>`;
+}
 function renderMockIntro() {
   const n = S.mocks.length;
   const due = visionDueEntries();
@@ -5371,6 +5402,10 @@ function renderMockIntro() {
   const completedPapers = visionCompletedPaperCount();
   app().innerHTML = `
     <div class="hero compact"><h1>模考與破題</h1><p>同一批混合題，分成兩種完全不同的訓練：完整模考建立真實成績；眼睛刷題只練從題目找到第一個切入點。</p></div>
+    <section class="paper-library is-primary"><div class="paper-library-head"><div><span class="eyebrow">最常用｜你提供的紙本來源</span><h2>原版模考</h2></div><p>三回保留原版內容，作答時拆成清晰單頁並可直接在題目與留白上寫。答案本已逐題核對；第二回依原卷為 19 題，其餘兩回各 20 題。</p></div>
+      <div class="paper-source-grid">${PAPER_SOURCES.map(paperSourceCardHTML).join('')}</div>
+      ${paperRunHistoryHTML()}
+    </section>
     ${due.length ? `<div class="card next-action"><div><span class="eyebrow">第二天到期</span><h2>${due.length} 題昨天沒有方向</h2><p>今天再看一次題目。仍無方向，才開詳解。</p></div><button class="btn primary" onclick="startVisionScan('${due[0].id}')">再想一次</button></div>` : ''}
     <div class="training-choice">
     <section class="card choice-card"><span class="eyebrow">完整一回</span><h2>全真模考</h2>
@@ -5384,10 +5419,7 @@ function renderMockIntro() {
       <p>有方向就對照詳解判斷這條路是否成立；一眼就會可略過；完全沒方向則留下所屬單元／觀念，隔天再給它一次機會。</p>
       <p class="dim">已完成 ${completedPapers} 整回｜等待明天 ${waiting.length} 題｜今天到期 ${due.length} 題</p>
       <div class="actr"><button class="btn primary big" onclick="startVisionScan()">${activePaper ? `繼續本回（${activeDone}/20）` : '開始一整回（20 題）'}</button></div>
-    </section></div>
-    <section class="paper-library"><div class="paper-library-head"><div><span class="eyebrow">你提供的紙本來源</span><h2>原版模考庫</h2></div><p>三回保留原版內容，作答時拆成清晰單頁並可直接在題目與留白上寫。答案本已逐題核對；第二回依原卷為 19 題，其餘兩回各 20 題。</p></div>
-      <div class="paper-source-grid">${PAPER_SOURCES.map(paperSourceCardHTML).join('')}</div>
-    </section>`;
+    </section></div>`;
 }
 
 /* ═══════════ 用眼睛刷題：第一天無方向就圈起來，第二天才可看詳解 ═══════════ */

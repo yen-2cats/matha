@@ -825,6 +825,7 @@ select:focus, textarea:focus, input:focus { outline: 2px solid rgba(117, 103, 92
 .choice-card h2 { font-size: 24px; font-weight: 580; }
 .choice-card .actr { margin-top: auto; }
 .paper-library { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--border); }
+.paper-library.is-primary { margin: 0 0 24px; padding: 20px; border: 1px solid #cbc4b8; border-radius: var(--r); background: #f3f0e9; box-shadow: var(--sh-1); }
 .paper-library-head { display: grid; grid-template-columns: minmax(180px, .65fr) minmax(280px, 1.35fr); gap: 24px; align-items: end; margin-bottom: 12px; }
 .paper-library-head h2 { margin: 0; font-size: 24px; font-weight: 580; }
 .paper-library-head p { margin: 0; color: var(--dim); }
@@ -839,6 +840,20 @@ select:focus, textarea:focus, input:focus { outline: 2px solid rgba(117, 103, 92
 .paper-source-card .paper-calibration-note { margin: 8px 0; padding: 8px 10px; border-radius: 7px; font-size: 13px; line-height: 1.45; }
 .paper-source-card .paper-practice-note { color: #695f52; background: #ebe6dc; border: 1px solid #ddd4c6; }
 .paper-source-card .paper-calibration-note { color: #4e6256; background: #e8eee8; border: 1px solid #d2ded4; }
+.paper-history { margin-top: 18px; padding: 17px 18px; background: #fbfaf7; border: 1px solid var(--border); border-radius: var(--r-s); }
+.paper-history-head { display: flex; align-items: end; justify-content: space-between; gap: 18px; }
+.paper-history-head h3 { margin: 3px 0 0; font-size: 20px; }
+.paper-history-head > b { color: var(--accent-deep); font-size: 15px; }
+.paper-history-list { margin-top: 12px; }
+.paper-history-row { display: grid; grid-template-columns: 118px minmax(210px, 1fr) auto; gap: 16px; align-items: center; min-height: 66px; padding: 10px 0; border-top: 1px solid var(--border); }
+.paper-history-date, .paper-history-main { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.paper-history-date span { color: var(--dim); font-size: 11px; }
+.paper-history-date time { font-weight: 650; font-variant-numeric: tabular-nums; }
+.paper-history-main b, .paper-history-main span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.paper-history-main span { color: var(--dim); font-size: 13px; }
+.paper-history-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.paper-history-actions .btn { margin: 0; white-space: nowrap; }
+.paper-history-empty { margin: 13px 0 0; padding-top: 13px; border-top: 1px solid var(--border); color: var(--dim); }
 .paper-learning-summary { margin-top: 18px; }
 .paper-level-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; margin: 14px 0 20px; }
 .paper-level-summary span { padding: 11px 12px; border: 1px solid var(--border); border-radius: 8px; background: #f7f5f0; color: var(--dim); }
@@ -1020,7 +1035,12 @@ select:focus, textarea:focus, input:focus { outline: 2px solid rgba(117, 103, 92
   .new-progress-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .bank-health { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .paper-library-head { gap: 8px; }
+  .paper-library.is-primary { padding: 15px; }
   .paper-source-card { min-height: 0; }
+  .paper-history-row { grid-template-columns: 1fr; gap: 8px; padding-block: 14px; }
+  .paper-history-main b, .paper-history-main span { white-space: normal; }
+  .paper-history-actions { justify-content: stretch; }
+  .paper-history-actions .btn { flex: 1 1 130px; }
   .paper-scan-stack { gap: 12px; margin-bottom: 126px; }
   .paper-submit-bar { bottom: 8px; margin-top: -110px; flex-direction: column; align-items: stretch; gap: 9px; padding: 12px; }
   .paper-submit-bar .btn { width: 100%; }
@@ -1114,6 +1134,8 @@ select:focus, textarea:focus, input:focus { outline: 2px solid rgba(117, 103, 92
   .paper-source-grid { gap: 14px; }
   .paper-source-card { min-height: 224px; padding: 20px; }
   .paper-source-card h3 { font-size: 21px; }
+  .paper-history { padding: 20px 22px; }
+  .paper-history-row { min-height: 74px; }
   .feedback-grid { gap: 15px; }
   .new-progress-grid { gap: 14px; margin-block: 18px 22px; }
   .new-progress-grid section { min-height: 140px; padding: 19px; }
