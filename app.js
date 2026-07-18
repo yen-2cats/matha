@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0718i'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
+const APP_VER = '0718j'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版
 
 /* ═══════════ 狀態 ═══════════ */
 const LEGACY_KEY = 'mathA13';
@@ -15,7 +15,18 @@ function userStateKey(userId) {
 function storedActiveUserId() {
   try { return localStorage.getItem(ACTIVE_USER_KEY) || ''; } catch (_) { return ''; }
 }
-let KEY = storedActiveUserId() ? userStateKey(storedActiveUserId()) : LEGACY_KEY;
+let KEY = storedActiveUserId() ? userStateKey(storedActiveUserId()) : ANONYMOUS_KEY;
+function localUserId() {
+  const prefix = `${LEGACY_KEY}:user:`;
+  return String(KEY || '').startsWith(prefix) ? String(KEY).slice(prefix.length) : '';
+}
+function localScopePrefix() {
+  return `matha-scope:${localUserId() ? `user:${localUserId()}` : 'anonymous'}::`;
+}
+function currentUserOwnsLegacyData() {
+  const uid = localUserId();
+  return !!uid && userStateKey(legacyOwnerId()) === KEY;
+}
 let S = load();
 function stripLegacyAiSecrets(state) {
   if (!state || typeof state !== 'object' || Array.isArray(state)) return state;
@@ -148,7 +159,20 @@ function packIsOff(src) {
    表還沒建 → 完全維持舊行為（內容照舊放 S），零風險降級。 */
 const SPLIT_LS = 'mathA13_split_v1';
 const CONTENT_LS = 'mathA13_content_v1'; // IndexedDB 不可用時的後備
+const CONTENT_LEGACY_CLAIM_KEY = 'mathA13_content_legacy_claimed_v1';
 let CONTENT = { packs: {} }; // pack_id → { kind:'qpack'|'notes'|'flash'|'outline', name, rev, items:[…] }
+function contentLocalStorageKey() {
+  return `${CONTENT_LS}:${localScopePrefix()}`;
+}
+function contentLegacyClaimKey() {
+  return `${CONTENT_LEGACY_CLAIM_KEY}:${localUserId() || 'anonymous'}`;
+}
+function contentLegacyClaimFinished() {
+  try { return localStorage.getItem(contentLegacyClaimKey()) === '1'; } catch (_) { return false; }
+}
+function contentLegacyClaimMarkFinished() {
+  try { localStorage.setItem(contentLegacyClaimKey(), '1'); } catch (_) {}
+}
 let contentTableMissing = false;
 function splitOn() { try { return localStorage.getItem(SPLIT_LS) === '1'; } catch (e) { return false; } }
 function extBankArr() { return splitOn() ? contentByKind('qpack') : (S.extbank || []); }
@@ -192,8 +216,17 @@ async function idbReadAll() {
   const db = await idbOpen();
   return new Promise((res, rej) => {
     const st = db.transaction('packs').objectStore('packs');
-    const out = {}; const rq = st.openCursor();
-    rq.onsuccess = () => { const c = rq.result; if (c) { out[c.key] = c.value; c.continue(); } else res(out); };
+    const out = {}, prefix = localScopePrefix();
+    const mayClaimLegacy = currentUserOwnsLegacyData() && !contentLegacyClaimFinished();
+    const rq = st.openCursor();
+    rq.onsuccess = () => {
+      const c = rq.result;
+      if (!c) { res(out); return; }
+      const key = String(c.key || '');
+      if (key.startsWith(prefix)) out[key.slice(prefix.length)] = c.value;
+      else if (mayClaimLegacy && !key.startsWith('matha-scope:') && !Object.hasOwn(out, key)) out[key] = c.value;
+      c.continue();
+    };
     rq.onerror = () => rej(rq.error);
   });
 }
@@ -201,9 +234,18 @@ async function idbWriteAll(packs) {
   const db = await idbOpen();
   return new Promise((res, rej) => {
     const tx = db.transaction('packs', 'readwrite');
-    const st = tx.objectStore('packs');
-    st.clear(); // 以傳入的 packs 為權威全集：先清再寫，還原/停用備份時舊包才不會殘留復活（唯一呼叫者 persistContent 傳完整 CONTENT.packs）
-    for (const k of Object.keys(packs)) st.put(packs[k], k);
+    const st = tx.objectStore('packs'), prefix = localScopePrefix(), removeLegacy = currentUserOwnsLegacyData();
+    const rq = st.openCursor();
+    rq.onsuccess = () => {
+      const c = rq.result;
+      if (!c) {
+        for (const k of Object.keys(packs)) st.put(packs[k], prefix + k);
+        return;
+      }
+      const key = String(c.key || '');
+      if (key.startsWith(prefix) || (removeLegacy && !key.startsWith('matha-scope:'))) c.delete();
+      c.continue();
+    };
     tx.oncomplete = () => res();
     tx.onerror = () => rej(tx.error);
   });
@@ -267,6 +309,8 @@ async function activateUserState(user) {
   S = load(KEY);
   await stateInit();
   await refreshInkLocalStatus();
+  CONTENT = { packs: {} };
+  await contentInit();
   applyExtBank();
   return true;
 }
@@ -279,6 +323,8 @@ async function deactivateUserState() {
   KEY = ANONYMOUS_KEY;
   S = freshState();
   await refreshInkLocalStatus();
+  CONTENT = { packs: {} };
+  await contentInit();
   applyExtBank();
 }
 /* localStorage 只保留同步啟動用的鏡像；真正的本機權威副本在 IndexedDB。
@@ -373,20 +419,38 @@ function inkCheckpoint(force) {
    key＝qid|ts（對得回 S.attempts 那一筆）；圖大→放 IDB 不塞 localStorage。 */
 let errShotWarn = false; // 本機配額吃緊：數據頁提示「該升級/清空間」
 async function errShotSave(key, data) {
+  const storageKey = localScopePrefix() + String(key || '');
   try {
     const db = await idbOpen();
-    await new Promise((res, rej) => { const tx = db.transaction('errshots', 'readwrite'); tx.objectStore('errshots').put(data, key); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); });
+    await new Promise((res, rej) => { const tx = db.transaction('errshots', 'readwrite'); tx.objectStore('errshots').put(data, storageKey); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); });
     errShotPrune(false).catch(() => {});
   } catch (e) {
     errShotWarn = true; // 寫失敗＝多半配額爆了：挪空間後重試一次；仍失敗雲端 ink_sessions 照樣有這題手寫
-    try { await errShotPrune(true); const db = await idbOpen(); await new Promise((res) => { const tx = db.transaction('errshots', 'readwrite'); tx.objectStore('errshots').put(data, key); tx.oncomplete = res; tx.onerror = res; }); } catch (_) {}
+    try { await errShotPrune(true); const db = await idbOpen(); await new Promise((res) => { const tx = db.transaction('errshots', 'readwrite'); tx.objectStore('errshots').put(data, storageKey); tx.oncomplete = res; tx.onerror = res; }); } catch (_) {}
   }
 }
-async function errShotCount() { try { const db = await idbOpen(); return await new Promise((res) => { const rq = db.transaction('errshots').objectStore('errshots').count(); rq.onsuccess = () => res(rq.result); rq.onerror = () => res(0); }); } catch (e) { return 0; } }
+async function errShotCount() { return (await errShotAll()).length; }
 async function errShotAll() {
   try {
     const db = await idbOpen();
-    return await new Promise((res) => { const out = []; const rq = db.transaction('errshots').objectStore('errshots').openCursor(); rq.onsuccess = () => { const c = rq.result; if (c) { out.push({ key: c.key, ...(c.value || {}) }); c.continue(); } else res(out); }; rq.onerror = () => res(out); });
+    return await new Promise((res) => {
+      const out = new Map(), prefix = localScopePrefix(), mayClaimLegacy = currentUserOwnsLegacyData();
+      const rq = db.transaction('errshots').objectStore('errshots').openCursor();
+      rq.onsuccess = () => {
+        const c = rq.result;
+        if (!c) { res([...out.values()]); return; }
+        const storageKey = String(c.key || '');
+        const scoped = storageKey.startsWith(prefix);
+        const legacy = mayClaimLegacy && !storageKey.startsWith('matha-scope:');
+        if (scoped || legacy) {
+          const key = scoped ? storageKey.slice(prefix.length) : storageKey;
+          const row = { ...(c.value || {}), key, storageKey };
+          if (scoped || !out.has(key)) out.set(key, row);
+        }
+        c.continue();
+      };
+      rq.onerror = () => res([...out.values()]);
+    });
   } catch (e) { return []; }
 }
 async function storageInfo() {
@@ -408,21 +472,39 @@ async function errShotPrune(force) {
   if (delN <= 0) return;
   const db = await idbOpen();
   const tx = db.transaction('errshots', 'readwrite'); const st = tx.objectStore('errshots');
-  for (let i = 0; i < delN; i++) st.delete(all[i].key);
+  for (let i = 0; i < delN; i++) st.delete(all[i].storageKey || all[i].key);
 }
 async function contentInit() {
   if (!splitOn()) return;
   // 逐 pack 合併兩個來源：IDB 可讀但曾寫失敗時，剛匯入的內容可能只在 localStorage 後備裡。
   let idb = null, ls = null;
   try { idb = await idbReadAll(); } catch (e) {}
-  try { const raw = localStorage.getItem(CONTENT_LS); if (raw) ls = JSON.parse(raw); } catch (e) {}
+  try {
+    const scoped = localStorage.getItem(contentLocalStorageKey());
+    const legacy = currentUserOwnsLegacyData() && !contentLegacyClaimFinished() ? localStorage.getItem(CONTENT_LS) : null;
+    if (scoped) ls = JSON.parse(scoped);
+    if (legacy) ls = mergePackStores(ls, JSON.parse(legacy));
+  } catch (e) {}
   CONTENT.packs = mergePackStores(idb, ls);
+  // 第一個核准帳號接收舊版未分帳內容後，立即複製到自己的 scope 並移除全域舊副本，
+  // 後續刪除／停用才不會被 legacy pack 再次復活。
+  if (currentUserOwnsLegacyData() && Object.keys(CONTENT.packs).length) await persistContent();
 }
 function persistContent() {
   // 回傳 promise<boolean>：true=已落地（IDB 或 localStorage 後備成功），false=兩者皆失敗（空間不足/隱私模式）。
   // 匯入/停用後要「等寫完再 reload」，否則 IDB 交易還沒 commit 就重載＝內容遺失；遷移前要靠回傳值確認落地才敢刪舊副本。
-  return idbWriteAll(CONTENT.packs).then(() => true).catch(() => {
-    try { localStorage.setItem(CONTENT_LS, JSON.stringify(CONTENT.packs)); return true; }
+  const finishLegacyClaim = () => {
+    if (currentUserOwnsLegacyData()) {
+      contentLegacyClaimMarkFinished();
+      try { localStorage.removeItem(CONTENT_LS); } catch (_) {}
+    }
+    return true;
+  };
+  return idbWriteAll(CONTENT.packs).then(finishLegacyClaim).catch(() => {
+    try {
+      localStorage.setItem(contentLocalStorageKey(), JSON.stringify(CONTENT.packs));
+      return finishLegacyClaim();
+    }
     catch (e) { saveQuotaErr = true; try { syncPill(); } catch (_) {} return false; }
   });
 }
@@ -1557,10 +1639,13 @@ function aiCredentialCleanup() {
   try {
     localStorage.removeItem(LEGACY_AI_LS);
     localStorage.removeItem(LEGACY_AI_MODEL_LS);
-    const raw = localStorage.getItem(KEY);
-    if (raw) {
+    for (const key of new Set([KEY, LEGACY_KEY])) {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
       const stored = JSON.parse(raw);
-      if (stored && typeof stored === 'object' && ('aikey' in stored || 'aikeyTs' in stored)) localStorage.setItem(KEY, JSON.stringify(S));
+      if (stored && typeof stored === 'object' && ('aikey' in stored || 'aikeyTs' in stored)) {
+        localStorage.setItem(key, JSON.stringify(stripLegacyAiSecrets(stored)));
+      }
     }
   } catch (e) {}
 }
@@ -2512,7 +2597,7 @@ function wilsonBounds(ok, n, z) {
 function mockCalibration() {
   const external = (S.extMocks || []).filter((m) =>
     m && m.total > 0 && Number.isFinite(Number(m.score)) &&
-    m.calibrationEligible !== false && (!m.questions || Number(m.questions) === 20))
+    extMockCalibrationEligible(m))
     .slice().sort((a, b) => String(a.d || '').localeCompare(String(b.d || '')) || Number(a.ts || 0) - Number(b.ts || 0)).slice(-3)
     .map((m) => ({ d: m.d, ok: Number(m.score), n: Number(m.total), acc: Number(m.score) / Number(m.total), name: m.name }));
   const system = (S.mocks || []).filter((m) => m && m.n > 0 && Number.isFinite(Number(m.acc))).slice(-3);
@@ -2530,6 +2615,17 @@ function mockCalibration() {
   const staleDays = Math.max(0, Math.round((new Date(today() + 'T00:00:00Z') - new Date(last.d + 'T00:00:00Z')) / 86400000));
   const passes = recent.filter((m) => Number(m.acc) >= SCORE_GOAL.targetAcc).length;
   return { count: recent.length, recent, source, ok, n, acc, low, high, grade: gradeOf(acc), passes, stable: recent.length === 3 && passes === 3, staleDays };
+}
+function extMockCalibrationEligible(record) {
+  if (!record || record.calibrationEligible === false) return false;
+  let sourceId = String(record.sourceId || '');
+  if (!sourceId && record.paperRunId) {
+    const run = (S.paperRuns || []).find((item) => item && item.id === record.paperRunId);
+    sourceId = String(run && run.sourceId || '');
+  }
+  const source = PAPER_SOURCES.find((item) => item.id === sourceId);
+  if (source && (source.questions !== 20 || source.calibrationEligible === false)) return false;
+  return record.questions == null || Number(record.questions) === 20;
 }
 function practicePulse() {
   const recent = (S.attempts || []).filter((a) => a.mode === 'mixed').slice(-40);
@@ -5553,6 +5649,7 @@ async function startPaperSource(sourceId) {
       inkMode: 'pen',
       inkWidth: paperInkWidthValue(run.paperInkWidth),
       inkColor,
+      inkUserId: syncState.user ? syncState.user.id : null,
       inkClientIds: Object.fromEntries(source.scans.map((_, page) => [page, paperInkClientFor(run, page)])),
     };
     paperSourceSession.page = Math.max(0, Math.min(source.scans.length - 1, paperSourceSession.page));
@@ -5568,7 +5665,7 @@ async function startPaperSource(sourceId) {
 /* 原卷平板工作台：將高解析跨頁即時拆成清晰單頁，筆跡直接覆蓋題目與右側留白。
    每個單頁有獨立筆跡，座標以 0–1 保存，旋轉平板或換裝置後仍能對齊；
    inkrecords 與既有 ink_sessions 共用離線補傳機制，不把大型筆跡塞進 localStorage 的主狀態。 */
-let paperInkSaveTimer = null;
+const paperInkSaveTimers = new Map();
 let paperInkCloudTimer = null;
 let paperStateSaveTimer = null;
 let paperZoomPaintTimer = null;
@@ -5711,23 +5808,41 @@ function paperInkCompact(data) {
   }
   return live;
 }
-function paperInkSnapshot(data, pageIndex) {
+function paperInkSnapshot(data, pageIndex, session = paperSourceSession) {
   const strokes = paperInkCompact(data).map(paperInkCloneStroke);
-  const current = paperSourceSession && Number(paperSourceSession.page) === Number(pageIndex)
-    ? paperSourceSession.inkCurrent : null;
+  const current = session && Number(session.page) === Number(pageIndex) ? session.inkCurrent : null;
   if (current && Array.isArray(current.pts) && current.pts.length > 1) strokes.push(paperInkCloneStroke(current));
   return strokes;
 }
-function paperInkScheduleRetry(pageIndex, data) {
-  if (Number(data.persistFailures) >= 3 || paperInkSaveTimer || !paperSourceSession || paperSourceSession.inkPages[pageIndex] !== data) return;
-  paperInkSaveTimer = setTimeout(() => {
-    paperInkSaveTimer = null;
-    paperInkPersistPage(pageIndex, data, false);
-  }, 1200);
+function paperInkSaveKey(session, pageIndex) {
+  return `${session && session.run && session.run.id || 'paper'}:${Number(pageIndex) || 0}`;
 }
-async function paperInkPersistPage(pageIndex, data, force) {
-  if (!paperSourceSession || !data) return false;
-  const run = paperSourceSession.run;
+function paperInkSaveTimerClear(session, pageIndex) {
+  const key = paperInkSaveKey(session, pageIndex);
+  const timer = paperInkSaveTimers.get(key);
+  if (timer != null) clearTimeout(timer);
+  paperInkSaveTimers.delete(key);
+}
+function paperInkSaveTimersClearAll() {
+  for (const timer of paperInkSaveTimers.values()) clearTimeout(timer);
+  paperInkSaveTimers.clear();
+}
+function paperInkScheduleRetry(pageIndex, data, session = paperSourceSession) {
+  if (!session || !data || session.inkPages[pageIndex] !== data) return;
+  const key = paperInkSaveKey(session, pageIndex);
+  if (paperInkSaveTimers.has(key)) return;
+  const delay = Math.min(30000, 1200 * (2 ** Math.min(5, Math.max(0, Number(data.persistFailures) - 1))));
+  const timer = setTimeout(() => {
+    if (paperInkSaveTimers.get(key) === timer) paperInkSaveTimers.delete(key);
+    paperInkPersistPage(pageIndex, data, false, session);
+  }, delay);
+  paperInkSaveTimers.set(key, timer);
+  // Node 測試環境的 Timeout 支援 unref；瀏覽器回傳數字、正式自動重試不受影響。
+  if (timer && typeof timer.unref === 'function') timer.unref();
+}
+async function paperInkPersistPage(pageIndex, data, force, session = paperSourceSession) {
+  if (!session || !data || !session.run) return false;
+  const run = session.run;
   if (data.persistPromise) {
     try { await data.persistPromise; } catch (_) {}
   }
@@ -5736,14 +5851,14 @@ async function paperInkPersistPage(pageIndex, data, force) {
     if (!data.dirty && !force) return wrote;
     const revision = Number(data.revision) || 0;
     const record = {
-      client_id: paperSourceSession.inkClientIds[pageIndex],
-      user_id: syncState.user ? syncState.user.id : null,
+      client_id: session.inkClientIds[pageIndex],
+      user_id: session.inkUserId || (syncState.user ? syncState.user.id : null),
       qid: paperInkQid(run, pageIndex),
       t0: Number(run.createdAt) + pageIndex,
       proc: { overlay: true, mode: 'paper-source', page: pageIndex, revision },
       strokes: {
         paper: true, revision,
-        s: paperInkSnapshot(data, pageIndex),
+        s: paperInkSnapshot(data, pageIndex, session),
         deleted: [...(data.deleted instanceof Set ? data.deleted : new Set(data.deleted || []))],
       },
       uploaded: false,
@@ -5760,14 +5875,14 @@ async function paperInkPersistPage(pageIndex, data, force) {
       clearTimeout(paperInkCloudTimer);
       paperInkCloudTimer = setTimeout(() => { if (syncState.user) flushInkQueue(); }, 1400);
       const status = $('#paper-ink-status');
-      if (status) status.textContent = paperInkGestureIsTemporaryErase() ? 'S Pen 側鍵按住：暫時橡皮擦' : '已保存';
+      if (status && paperSourceSession === session) status.textContent = paperInkGestureIsTemporaryErase() ? 'S Pen 側鍵按住：暫時橡皮擦' : '已保存';
     } catch (_) {
       data.dirty = true;
       data.persistFailures = (Number(data.persistFailures) || 0) + 1;
       statePersistErr = true;
       const status = $('#paper-ink-status');
-      if (status) status.textContent = '保存失敗，正在自動重試；請先不要關閉頁面';
-      paperInkScheduleRetry(pageIndex, data);
+      if (status && paperSourceSession === session) status.textContent = '保存失敗，正在自動重試；請先不要關閉頁面';
+      paperInkScheduleRetry(pageIndex, data, session);
       return false;
     } finally {
       if (data.persistPromise === request) data.persistPromise = null;
@@ -5778,7 +5893,8 @@ async function paperInkPersistPage(pageIndex, data, force) {
 }
 function paperInkPersist(force) {
   if (!paperSourceSession) return Promise.resolve(false);
-  const { run, page } = paperSourceSession;
+  const session = paperSourceSession;
+  const { run, page } = session;
   const data = paperInkPage(page);
   if (!data) return Promise.resolve(false);
   const pageIndex = Number(page) || 0;
@@ -5786,15 +5902,17 @@ function paperInkPersist(force) {
   if (!paperSourceSession.inkClientIds[pageIndex]) paperSourceSession.inkClientIds[pageIndex] = paperInkClientFor(run, pageIndex);
   if (!data.dirty && !force) return Promise.resolve(false);
   if (force) {
-    clearTimeout(paperInkSaveTimer);
-    paperInkSaveTimer = null;
-    return paperInkPersistPage(pageIndex, data, true);
+    paperInkSaveTimerClear(session, pageIndex);
+    return paperInkPersistPage(pageIndex, data, true, session);
   }
-  if (!paperInkSaveTimer) {
-    paperInkSaveTimer = setTimeout(() => {
-      paperInkSaveTimer = null;
-      paperInkPersistPage(pageIndex, data, false);
+  const key = paperInkSaveKey(session, pageIndex);
+  if (!paperInkSaveTimers.has(key)) {
+    const timer = setTimeout(() => {
+      if (paperInkSaveTimers.get(key) === timer) paperInkSaveTimers.delete(key);
+      paperInkPersistPage(pageIndex, data, false, session);
     }, 450);
+    paperInkSaveTimers.set(key, timer);
+    if (timer && typeof timer.unref === 'function') timer.unref();
   }
   const status = $('#paper-ink-status');
   if (status) status.textContent = paperInkGestureIsTemporaryErase() ? 'S Pen 側鍵按住：暫時橡皮擦' : '保存中';
@@ -6641,7 +6759,13 @@ async function paperAiGradeCall(source, pages) {
   });
   const payload = await openAiInvoke({ responseType: 'paper_grade', messages: [{ role: 'user', content }] }, 90000);
   if (!payload.json || typeof payload.json !== 'object') throw new Error('OpenAI 沒有回傳完整批改資料');
-  return { json: payload.json, model: String(payload.model || '') };
+  return {
+    json: payload.json,
+    model: String(payload.model || ''),
+    requestId: String(payload.requestId || ''),
+    usage: payload.usage && typeof payload.usage === 'object' ? payload.usage : null,
+    budget: payload.budget && typeof payload.budget === 'object' ? payload.budget : null,
+  };
 }
 function paperFallbackMark(source, no, page, label, kind, option, slot) {
   const pageNos = source.key.map((_, index) => index + 1)
@@ -6675,7 +6799,12 @@ function paperNormalizeAiGrade(source, raw, model) {
     const finalAnswer = finalAnswerProvided ? item.finalAnswer.trim() : '';
     const correctOptions = q.type === 'single' || q.type === 'multi'
       ? q.ans.map((option) => option + 1).sort((a, b) => a - b) : [];
-    const explicitlyUnanswered = item.hasFinalAnswer === false || status === 'unanswered';
+    const concreteAnswer = q.type === 'fill'
+      ? finalAnswerProvided && !!finalAnswer
+      : selectedOptionsProvided && selectedOptions.length > 0;
+    // `status` 是模型摘要，結構化答案才是確定性核分依據。只有明確說「沒找到答案」，
+    // 或既沒有答案內容、status 也為 unanswered 時，才判未答。
+    const explicitlyUnanswered = item.hasFinalAnswer === false || (status === 'unanswered' && !concreteAnswer);
     let points = Number(item.points);
     if (status === 'uncertain') points = 0;
     else if (q.type === 'single' && selectedOptionsProvided) {
@@ -6832,6 +6961,9 @@ function paperGradeSnapshot(grade, reason) {
     at: Date.now(),
     reason: String(reason || 'snapshot').slice(0, 80),
     model: String(grade && grade.model || ''),
+    requestId: String(grade && grade.requestId || ''),
+    promptVersion: String(grade && grade.promptVersion || ''),
+    usage: grade && grade.usage && typeof grade.usage === 'object' ? { ...grade.usage } : null,
     gradedAt: Number(grade && grade.gradedAt) || null,
     score: Number(grade && grade.score) || 0,
     questions: (grade && Array.isArray(grade.questions) ? grade.questions : []).map((item) => ({
@@ -6940,6 +7072,10 @@ async function paperSourceGrade(reason) {
     if (progress) progress.textContent = `已送出 ${source.scans.length} 頁，正在逐題辨識與核分…`;
     const response = await paperAiGradeCall(source, pages);
     const grade = paperNormalizeAiGrade(source, response.json, response.model);
+    grade.requestId = response.requestId;
+    grade.usage = response.usage;
+    grade.budget = response.budget;
+    grade.promptVersion = 'paper-grade-first-pass-v2';
     if (run.status === 'discarded') return;
     paperSourceRecordGrade(source, run, grade);
     if (paperSourceSession === session) {
@@ -6988,6 +7124,7 @@ async function openPaperGradeResult(runId) {
     paperSourceSession = {
       source, run, urls, inkPages, page:0, zoom:1, inkMode:'pen',
       inkWidth:paperInkWidthValue(run.paperInkWidth), inkColor:'black', readOnly:true,
+      inkUserId:syncState.user ? syncState.user.id : null,
       inkClientIds:Object.fromEntries(source.scans.map((_, page) => [page, paperInkClientFor(run, page)])),
     };
     sessionMode = 'paper-result';
@@ -7021,15 +7158,23 @@ function paperGradeAuditSave() {
   const rows = [...document.querySelectorAll('.paper-grade-audit tbody tr')];
   if (rows.length !== grade.questions.length) { alert('覆核表不完整，沒有修改任何分數。'); return; }
   paperGradeAuditPush(run, '人工覆核前');
+  const adjustedAt = Date.now();
   for (const row of rows) {
     const no = Number(row.dataset.no), item = grade.questions.find((question) => question.no === no);
     const key = source.key[no - 1];
     if (!item || !key) continue;
     const status = row.querySelector('.paper-audit-status').value;
     const points = Math.max(0, Math.min(Number(key.points) || 0, Number(row.querySelector('.paper-audit-points').value) || 0));
-    item.status = ['correct', 'incorrect', 'unanswered', 'uncertain'].includes(status) ? status : 'uncertain';
-    item.points = Math.round(points * 100) / 100;
-    item.manual = true;
+    const nextStatus = ['correct', 'incorrect', 'unanswered', 'uncertain'].includes(status) ? status : 'uncertain';
+    const nextPoints = Math.round(points * 100) / 100;
+    const changed = item.status !== nextStatus || Number(item.points) !== nextPoints;
+    item.status = nextStatus;
+    item.points = nextPoints;
+    if (changed) {
+      item.manual = true;
+      item.manualAt = adjustedAt;
+      item.mt = adjustedAt;
+    }
     const kind = item.status === 'correct' ? 'check'
       : item.status === 'incorrect' && item.points > 0 ? 'partial'
       : item.status === 'incorrect' ? 'cross'
@@ -7040,7 +7185,7 @@ function paperGradeAuditSave() {
     item.marks = [first];
   }
   grade.model = String(grade.model || 'gpt-5.5');
-  grade.adjustedAt = Date.now();
+  grade.adjustedAt = adjustedAt;
   grade.adjustmentCount = (Number(grade.adjustmentCount) || 0) + 1;
   paperGradeRecalculate(grade);
   run.score = grade.score;
@@ -7723,7 +7868,7 @@ function paperReviewEffort() {
 function paperReviewStuck() {
   const effort = paperReviewEffort(); if (!effort) return;
   const no = paperReview.nos[paperReview.i], state = paperReview.run.review[no];
-  state.logs = state.logs || []; state.logs.push(effort); state.attempts = (state.attempts || 0) + 1;
+  state.logs = state.logs || []; state.logs.push({ ...effort, kind:'retry' }); state.attempts = (state.attempts || 0) + 1;
   state.topic = effort.topic || state.topic || ''; state.errorKind = effort.errorKind;
   paperReview.run.mt = Date.now();
   paperRunRefreshLearningTags(paperReview.run);
@@ -7733,7 +7878,7 @@ function paperReviewStuck() {
 function paperReviewComplete(level) {
   const effort = paperReviewEffort(); if (!effort) return;
   const no = paperReview.nos[paperReview.i], state = paperReview.run.review[no];
-  state.logs = state.logs || []; state.logs.push(effort); state.done = true; state.level = 2;
+  state.logs = state.logs || []; state.logs.push({ ...effort, kind:'complete' }); state.done = true; state.level = 2;
   state.outcome = 'answer-only'; state.completedAt = Date.now();
   state.topic = effort.topic || state.topic || ''; state.errorKind = effort.errorKind;
   paperReview.run.mt = Date.now();
@@ -8816,6 +8961,26 @@ async function syncPull() {
     syncPush();
   } catch (e) { syncState.msg = '離線（資料在本機）'; syncPill(); }
 }
+function paperReviewRetryLogCount(logs, A, B) {
+  const legacy = (logs || []).map((log, index) => ({ log, index }))
+    .filter(({ log }) => !String(log && log.kind || ''));
+  const excluded = new Set();
+  for (const completedAt of [A && A.completedAt, B && B.completedAt].map(Number).filter(Boolean)) {
+    let best = null;
+    for (const row of legacy) {
+      if (excluded.has(row.index)) continue;
+      const distance = Math.abs(Number(row.log && row.log.ts || 0) - completedAt);
+      if (distance <= 2000 && (!best || distance < best.distance)) best = { index:row.index, distance };
+    }
+    if (best) excluded.add(best.index);
+  }
+  return (logs || []).reduce((count, log, index) => {
+    const kind = String(log && log.kind || '');
+    if (kind === 'complete') return count;
+    if (kind === 'retry') return count + 1;
+    return count + (excluded.has(index) ? 0 : 1);
+  }, 0);
+}
 function mergePaperReviewState(A, B) {
   const newer = Number(B && (B.mt || B.completedAt) || 0) >= Number(A && (A.mt || A.completedAt) || 0) ? B : A;
   const older = newer === A ? B : A;
@@ -8827,13 +8992,68 @@ function mergePaperReviewState(A, B) {
   logs.sort((x, y) => Number(x && x.ts || 0) - Number(y && y.ts || 0));
   return {
     ...(older || {}), ...(newer || {}),
-    attempts: Math.max(Number(A && A.attempts || 0), Number(B && B.attempts || 0)),
+    attempts: Math.max(
+      Number(A && A.attempts || 0),
+      Number(B && B.attempts || 0),
+      paperReviewRetryLogCount(logs, A, B),
+    ),
     logs,
     done: !!(A && A.done || B && B.done),
     completedAt: Math.max(Number(A && A.completedAt || 0), Number(B && B.completedAt || 0)) || null,
-    detailUnlockedAt: Math.max(Number(A && A.detailUnlockedAt || 0), Number(B && B.detailUnlockedAt || 0)) || null,
+    solutionUnlockedAt: Math.max(
+      Number(A && (A.solutionUnlockedAt || A.detailUnlockedAt) || 0),
+      Number(B && (B.solutionUnlockedAt || B.detailUnlockedAt) || 0),
+    ) || null,
     mt: Math.max(Number(A && A.mt || 0), Number(B && B.mt || 0)),
   };
+}
+function paperGradeAuditShowsManualChange(audits, item, adjustedAt) {
+  const limit = Number(adjustedAt) || Infinity;
+  const candidates = (Array.isArray(audits) ? audits : [])
+    .filter((audit) => audit && String(audit.reason || '').includes('人工覆核')
+      && Number(audit.at || 0) <= limit
+      && Array.isArray(audit.questions));
+  let found = false;
+  for (const audit of candidates) {
+    const before = audit.questions.find((question) => Number(question && question.no) === Number(item && item.no));
+    if (!before) continue;
+    found = true;
+    if (String(before.status || 'uncertain') !== String(item.status || 'uncertain')
+      || Number(before.points || 0) !== Number(item.points || 0)) return true;
+  }
+  return found ? false : null;
+}
+function paperGradeMergeItemStamp(item, grade, audits) {
+  const explicit = Number(item && (item.mt || item.manualAt) || 0);
+  if (explicit) return explicit;
+  const gradedAt = Number(grade && grade.gradedAt || 0);
+  if (!item || !item.manual) return gradedAt;
+  const adjustedAt = Number(grade && grade.adjustedAt || 0) || gradedAt;
+  const changed = paperGradeAuditShowsManualChange(audits, item, adjustedAt);
+  return changed === false ? gradedAt : adjustedAt;
+}
+function mergePaperGrade(A, B, auditsA, auditsB) {
+  if (!A) return B;
+  if (!B) return A;
+  const gradeStamp = (grade) => Number(grade && (grade.adjustedAt || grade.gradedAt) || 0);
+  const newer = gradeStamp(B) >= gradeStamp(A) ? B : A;
+  const older = newer === A ? B : A;
+  const byNo = new Map();
+  const put = (item, grade, audits) => {
+    const no = Number(item && item.no);
+    if (!Number.isInteger(no)) return;
+    const old = byNo.get(no);
+    // 人工覆核只更新真的改過的題；未改題仍沿用原始 gradedAt，
+    // 舊版沒有逐題時間時，使用「人工覆核前」快照判斷這題是否真的改過。
+    const stamp = paperGradeMergeItemStamp(item, grade, audits);
+    if (!old || stamp >= old.stamp) byNo.set(no, { item: { ...item }, stamp });
+  };
+  const olderAudits = older === A ? auditsA : auditsB;
+  const newerAudits = newer === A ? auditsA : auditsB;
+  for (const item of older.questions || []) put(item, older, olderAudits);
+  for (const item of newer.questions || []) put(item, newer, newerAudits);
+  const questions = [...byNo.values()].map((row) => row.item).sort((x, y) => Number(x.no) - Number(y.no));
+  return paperGradeRecalculate({ ...older, ...newer, questions });
 }
 function mergePaperRunRecord(A, B) {
   if (!A) return B;
@@ -8852,14 +9072,20 @@ function mergePaperRunRecord(A, B) {
   audits.sort((x, y) => Number(x.at || 0) - Number(y.at || 0));
   const topics = [...new Set([...(A.topics || []), ...(B.topics || [])])];
   const errors = [...new Set([...(A.errors || []), ...(B.errors || [])])];
-  return {
+  const aiGrade = mergePaperGrade(A.aiGrade, B.aiGrade, A.gradeAudit, B.gradeAudit);
+  const merged = {
     ...older, ...newer,
     mt: Math.max(Number(A.mt || 0), Number(B.mt || 0)),
     review,
     gradeAudit: audits.slice(-20),
     paperInkClients: { ...(older.paperInkClients || {}), ...(newer.paperInkClients || {}) },
-    topics, errors,
+    topics, errors, aiGrade,
   };
+  if (aiGrade) {
+    merged.score = aiGrade.score;
+    merged.wrongNos = aiGrade.wrongNos.slice();
+  }
+  return merged;
 }
 function mergeState(a, b) {
   // 兩台裝置各自累積也不丟資料：紀錄類取聯集，其餘欄位取較「多」的一方

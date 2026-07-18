@@ -671,7 +671,12 @@ Deno.serve(async (req: Request) => {
       userId,
       response.usage as Record<string, unknown> | undefined,
     ).catch(() => {});
-    const common = { model: response.model, usage: response.usage, budget };
+    const common = {
+      model: response.model,
+      requestId: String(response.id || ""),
+      usage: response.usage,
+      budget,
+    };
     if (isStructured) {
       try {
         return reply(origin, 200, { ...common, json: JSON.parse(text) });

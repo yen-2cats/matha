@@ -252,7 +252,7 @@ test('S Pen 側鍵暫時切換橡皮擦，懸停不誤刪且放開恢復原工�
     const contact = { deleted:!!stroke.dead, mode:canvas.dataset.mode, status:status.textContent, active:{ ...active } };
     paperInkUp(pen('pointerup', 0, 0));
     const restored = { mode:canvas.dataset.mode, status:status.textContent, active:{ ...active } };
-    clearTimeout(paperInkSaveTimer); clearTimeout(paperInkCloudTimer);
+    paperInkSaveTimersClearAll(); clearTimeout(paperInkCloudTimer);
     return { mapping, hover, contact, restored };
   })()`));
   assert.deepEqual(result.mapping, { barrel:true, barrelWithTip:true, samsungBarrel:true, samsungWithTip:true, tail:true, androidSecondary:true, samsungDown:true, fallback:true, released:false, mouse:false });
@@ -542,6 +542,35 @@ test('第一次簡批的單選與填答由正式答案重新核分，不採信�
     q1:{ status:'incorrect', points:0 },
     q14:{ status:'incorrect', points:0 },
     wrong:[1,14],
+  });
+});
+
+test('模型 status 與結構化答案衝突時，以實際辨識答案確定性核分', () => {
+  const { run } = loadApp();
+  const result = plain(run(`(() => {
+    const source = PAPER_SOURCES[0];
+    const raw = { questions:source.key.map((q, i) => ({
+      no:i + 1, page:paperQuestionScanIndex(source, i + 1) + 1,
+      read:'模型辨識', status:'correct', hasFinalAnswer:true,
+      finalAnswer:q.type === 'fill' ? String(q.ans[0]) : '',
+      selectedOptions:q.type === 'fill' ? [] : q.ans.map((option) => option + 1),
+      points:q.points, marks:[],
+    })) };
+    raw.questions[0].status = 'unanswered';
+    raw.questions[13].status = 'unanswered';
+    const grade = paperNormalizeAiGrade(source, raw, 'gpt-5.5');
+    return {
+      score:grade.score,
+      q1:[grade.questions[0].status, grade.questions[0].points],
+      q14:[grade.questions[13].status, grade.questions[13].points],
+      wrong:grade.wrongNos,
+    };
+  })()`));
+  assert.deepEqual(result, {
+    score:100,
+    q1:['correct', 5],
+    q14:['correct', 5],
+    wrong:[],
   });
 });
 
@@ -875,9 +904,11 @@ test('原始 19 題卷保留練習價值，但不污染 20 題正式級分校準
   const { run } = loadApp();
   const result = plain(run(`(() => {
     const practice = PAPER_SOURCES.find((source) => source.questions === 19);
+    S.paperRuns = [{ id:'legacy-run', sourceId:practice.id }];
     S.extMocks = [
       { id:'formal', d:'2026-07-17', score:70, total:100, questions:20, calibrationEligible:true, ts:1 },
       { id:'practice', d:'2026-07-18', score:100, total:100, questions:19, calibrationEligible:false, ts:2 },
+      { id:'legacy-practice', paperRunId:'legacy-run', sourceId:practice.id, d:'2026-07-16', score:100, total:100, ts:0 },
     ];
     const calibration = mockCalibration();
     return {
