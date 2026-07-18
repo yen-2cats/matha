@@ -96,7 +96,9 @@ async function verifyPaperDetailGate(userId: string, rawContext: unknown) {
     : {};
   const runId = String(context.paperRunId || "");
   const questionNo = Number(context.questionNo);
-  if (!runId || !Number.isInteger(questionNo) || questionNo < 1 || questionNo > 20) {
+  if (
+    !runId || !Number.isInteger(questionNo) || questionNo < 1 || questionNo > 20
+  ) {
     return false;
   }
   const query = new URL(`${APP_SUPABASE_URL}/rest/v1/app_state`);
@@ -109,10 +111,13 @@ async function verifyPaperDetailGate(userId: string, rawContext: unknown) {
       Authorization: `Bearer ${serviceRoleKey}`,
     },
   });
-  if (!response.ok) throw new Error(`Cannot verify paper review (${response.status})`);
+  if (!response.ok) {
+    throw new Error(`Cannot verify paper review (${response.status})`);
+  }
   const rows = await response.json() as Array<Record<string, unknown>>;
   const data = rows[0] && rows[0].data as Record<string, unknown> | undefined;
-  const runs = Array.isArray(data && data.paperRuns) ? data.paperRuns : [];
+  const rawRuns = data?.paperRuns;
+  const runs: unknown[] = Array.isArray(rawRuns) ? rawRuns : [];
   const run = runs.find((item) =>
     item && typeof item === "object" &&
     String((item as Record<string, unknown>).id || "") === runId
@@ -121,8 +126,11 @@ async function verifyPaperDetailGate(userId: string, rawContext: unknown) {
   const review = run.review && typeof run.review === "object"
     ? run.review as Record<string, unknown>
     : {};
-  const state = review[String(questionNo)] as Record<string, unknown> | undefined;
-  const logs = Array.isArray(state && state.logs) ? state.logs : [];
+  const state = review[String(questionNo)] as
+    | Record<string, unknown>
+    | undefined;
+  const rawLogs = state?.logs;
+  const logs: unknown[] = Array.isArray(rawLogs) ? rawLogs : [];
   return !!state && (Number(state.attempts) > 0 || logs.length > 0);
 }
 
