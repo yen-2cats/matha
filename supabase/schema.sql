@@ -263,6 +263,7 @@ begin
   return jsonb_build_object(
     'allowed', true,
     'kind', p_kind,
+    'date', usage_day,          -- 回傳扣額日：跨午夜完成的請求把 token 記回這一天
     'requests', current_row.request_count,
     'weight', current_row.request_weight,
     'limit', 120
@@ -272,10 +273,12 @@ $$;
 revoke all on function public.claim_ai_request(uuid, text, integer) from public;
 grant execute on function public.claim_ai_request(uuid, text, integer) to service_role;
 
-create or replace function public.record_ai_usage(
+-- OpenAI 呼叫失敗（逾時/HTTP 錯誤/沒回文字）時由 proxy 退還額度：
+-- 否則整卷批改（權重 12）逾時幾次就燒光一天額度卻沒拿到結果。
+-- 只退當天的列、地板為 0；last_request_at 不動（4 秒連點限制照舊）。
+create or replace function public.refund_ai_request(
   p_user_id uuid,
-  p_input_tokens bigint,
-  p_output_tokens bigint
+  p_weight integer
 )
 returns void
 language sql
@@ -283,11 +286,35 @@ security definer
 set search_path = public
 as $$
   update public.ai_daily_usage
-  set input_tokens = input_tokens + greatest(coalesce(p_input_tokens, 0), 0),
-      output_tokens = output_tokens + greatest(coalesce(p_output_tokens, 0), 0),
+  set request_count = greatest(request_count - 1, 0),
+      request_weight = greatest(request_weight - greatest(1, least(coalesce(p_weight, 1), 20)), 0),
       updated_at = now()
   where user_id = p_user_id
     and usage_date = (timezone('Asia/Taipei', now()))::date;
 $$;
-revoke all on function public.record_ai_usage(uuid, bigint, bigint) from public;
-grant execute on function public.record_ai_usage(uuid, bigint, bigint) to service_role;
+revoke all on function public.refund_ai_request(uuid, integer) from public;
+grant execute on function public.refund_ai_request(uuid, integer) to service_role;
+
+-- 簽名改了（加 p_usage_date）：先移除舊 3 參數版本，避免留下兩個 overload
+drop function if exists public.record_ai_usage(uuid, bigint, bigint);
+create or replace function public.record_ai_usage(
+  p_user_id uuid,
+  p_input_tokens bigint,
+  p_output_tokens bigint,
+  p_usage_date date default null
+)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  -- 記回「扣額那天」的列（p_usage_date＝claim 回傳的 date）；沒帶就記今天。
+  update public.ai_daily_usage
+  set input_tokens = input_tokens + greatest(coalesce(p_input_tokens, 0), 0),
+      output_tokens = output_tokens + greatest(coalesce(p_output_tokens, 0), 0),
+      updated_at = now()
+  where user_id = p_user_id
+    and usage_date = coalesce(p_usage_date, (timezone('Asia/Taipei', now()))::date);
+$$;
+revoke all on function public.record_ai_usage(uuid, bigint, bigint, date) from public;
+grant execute on function public.record_ai_usage(uuid, bigint, bigint, date) to service_role;
