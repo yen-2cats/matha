@@ -577,3 +577,32 @@ test('revision compare-and-swap 遇到另一台搶先更新會重拉合併，不
   assert.deepEqual(context.__updates, [{ revision: 8, expected: 7 }, { revision: 9, expected: 8 }]);
   assert.deepEqual(context.__remote.data.attempts.map((x) => x.qid), ['remote-a', 'remote-b', 'local']);
 });
+
+test('匯入題包的 fill 正解與 src 皆經跳脫，不得成為儲存型 XSS', () => {
+  const { context, run } = loadApp();
+  // 1) texVal / mDispOpt：fill 題 ans 是匯入資料，裸 < 不可原樣進 innerHTML
+  const island = run(`mDispOpt('<img src=x onerror=alert(1)>')`);
+  assert.equal(island.includes('<img'), false);
+  assert.match(island, /&lt;img/);
+  // 合法數學（0<x<1）跳脫後仍保留語意（innerHTML 還原成文字節點給 KaTeX）
+  assert.equal(run(`mDispOpt('0<x<1')`), '\\(0&lt;x&lt;1\\)');
+  // 2) renderQuestion 的 src 標籤
+  context.__app = { innerHTML: '' };
+  context.document.querySelector = (selector) => selector === '#app' ? context.__app : null;
+  const html = run(`(() => {
+    sessionChrome = () => {}; inkStart = () => {}; startTicker = () => {}; rtTxt = (value) => escH(String(value || ''));
+    const q = { id: 'xss-src', topic: 'prob', type: 'fill', diff: 1, q: '題目', ans: ['1'], src: '<img src=x onerror=alert(1)>' };
+    renderQuestion(q, { head: 1, noTimer: true, onDone: () => {} });
+    return __app.innerHTML;
+  })()`);
+  assert.equal(html.includes('<img src=x'), false);
+  assert.match(html, /&lt;img/);
+});
+
+test('validateQ 拒絕原型鏈保留字 id', () => {
+  const { run } = loadApp();
+  const errs = plain(run(`['__proto__', 'constructor', 'prototype', 'normal-1'].map((id) =>
+    validateQ({ id, topic: 'prob', type: 'fill', diff: 1, q: 'q', ans: ['1'] }))`));
+  assert.equal(errs[0] !== null && errs[1] !== null && errs[2] !== null, true);
+  assert.equal(errs[3], null);
+});

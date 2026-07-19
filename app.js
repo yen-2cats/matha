@@ -130,6 +130,7 @@ function mergePackStores(primary, fallback) {
 function validateQ(q) {
   if (!q || typeof q.id !== 'string' || !q.id) return 'id 缺漏';
   if (!/^[\w.:-]+$/.test(q.id)) return 'id 含不合法字元'; // id 會進 inline onclick（jsA），限字元集斷絕注入面（現有題 id 全是英數/-/_/:/. ）
+  if (['__proto__', 'constructor', 'prototype'].includes(q.id)) return 'id 不可用保留字'; // S.wrong[q.id]、Map 之外的物件索引會打到原型鏈
   if (!TOPICS[q.topic]) return `topic「${q.topic}」不存在`;
   if (!['single', 'multi', 'fill'].includes(q.type)) return `type「${q.type}」不合法`;
   if (![1, 2, 3].includes(q.diff)) return `diff「${q.diff}」不合法`;
@@ -3962,7 +3963,8 @@ function texBody(s) {
   if (m) return '\\frac{' + m[1] + '}{' + m[2] + '}';
   return s;
 }
-function texVal(s) { return T(texBody(s)); }
+// 島內容一律過 escIsland：fill 題 ans 可能來自匯入題包（不可信），裸 < 進 innerHTML＝儲存型 XSS
+function texVal(s) { return T(escIsland(texBody(s))); }
 /* 2×2：det→行列式直線 vmatrix，否則矩陣方括號 bmatrix */
 function m2H(a, b, c, d, det) { const L = det ? 'vmatrix' : 'bmatrix'; return T('\\begin{' + L + '}' + a + ' & ' + b + ' \\\\ ' + c + ' & ' + d + '\\end{' + L + '}'); }
 function fracH(n, d) { return T('\\frac{' + texBody(String(n)) + '}{' + texBody(String(d)) + '}'); }
@@ -4880,7 +4882,7 @@ function renderQuestion(q, cfg) {
   qsess = { q, cfg, t0: Date.now(), warned: false, locked: false };
   const target = qTarget(q);
   const showTimer = timerOn() && !cfg.noTimer;
-  const meta = cfg.hideTopic ? '全範圍混合' : `${TOPICS[q.topic]}${q.src ? `｜<b class="accent">${q.src}</b>` : ''}｜${stars(q.diff)}`;
+  const meta = cfg.hideTopic ? '全範圍混合' : `${TOPICS[q.topic]}${q.src ? `｜<b class="accent">${escH(q.src)}</b>` : ''}｜${stars(q.diff)}`; // src 來自匯入題包，不可信
   const giveUp = `<button class="btn sm skip" onclick="qGiveUp()">🏳 放棄，看答案</button>`;
   const hintBtn = aiEnabled() ? `<button class="btn sm" onclick="qHint()">💡 我卡關了</button>` : ''; // AI 看你手寫、給下一步提示（不給完整答案）
   let actions;
