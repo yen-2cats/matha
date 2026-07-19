@@ -27,6 +27,8 @@
 
 ## 部署
 
+完整程序(含 schema 套用順序與驗證步驟)見 `supabase/DEPLOY.md`。
+
 ```powershell
 npx supabase login
 npx supabase functions deploy openai-proxy --project-ref rrihysbxhsbxjteqmtdu --no-verify-jwt
