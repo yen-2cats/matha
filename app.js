@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0718l'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版。改版時 index.html ?v= 與 sw.js APP_STAMP 要同步（tests/assets.test.js 會驗）
+const APP_VER = '0720a'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版。改版時 index.html ?v= 與 sw.js APP_STAMP 要同步（tests/assets.test.js 會驗）
 
 /* ═══════════ 狀態 ═══════════ */
 const LEGACY_KEY = 'mathA13';
@@ -193,13 +193,26 @@ function idbOpen() {
     let done = false;
     const to = setTimeout(() => { if (!done) { done = true; rej(new Error('IDB open 逾時')); } }, 4000); // 逾時保底：別讓 boot 因升級被舊分頁擋住而永久白畫面
     if (typeof indexedDB === 'undefined') { clearTimeout(to); rej(new Error('IndexedDB 不可用')); return; }
-    const rq = indexedDB.open('mathA13Content', 4);
+    const rq = indexedDB.open('mathA13Content', 5);
     rq.onupgradeneeded = () => {
       const db = rq.result;
       if (!db.objectStoreNames.contains('packs')) db.createObjectStore('packs');
       if (!db.objectStoreNames.contains('errshots')) db.createObjectStore('errshots');
       if (!db.objectStoreNames.contains('state')) db.createObjectStore('state');
-      if (!db.objectStoreNames.contains('inkrecords')) db.createObjectStore('inkrecords', { keyPath: 'client_id' });
+      const inkStore = db.objectStoreNames.contains('inkrecords')
+        ? rq.transaction.objectStore('inkrecords')
+        : db.createObjectStore('inkrecords', { keyPath: 'client_id' });
+      if (!inkStore.indexNames.contains('qid')) inkStore.createIndex('qid', 'qid', { unique: false });
+      if (!inkStore.indexNames.contains('upload_state')) inkStore.createIndex('upload_state', 'upload_state', { unique: false });
+      if (!inkStore.indexNames.contains('user_id')) inkStore.createIndex('user_id', 'user_id', { unique: false });
+      const cursor = inkStore.openCursor();
+      cursor.onsuccess = () => {
+        const item = cursor.result;
+        if (!item) return;
+        const row = item.value || {};
+        if (!row.upload_state) item.update({ ...row, upload_state: row.uploaded ? 'uploaded' : 'pending' });
+        item.continue();
+      };
     };
     rq.onsuccess = () => {
       if (done) { try { rq.result.close(); } catch (_) {} return; }
@@ -353,7 +366,11 @@ function inkClientId(qid, t0) {
 }
 async function inkRecordPut(record) {
   const db = await idbOpen();
-  const row = { ...record, updatedAt: Date.now() };
+  const row = {
+    ...record,
+    upload_state: record && record.uploaded ? 'uploaded' : 'pending',
+    updatedAt: Date.now(),
+  };
   return new Promise((res, rej) => {
     const tx = db.transaction('inkrecords', 'readwrite');
     tx.objectStore('inkrecords').put(row);
@@ -370,14 +387,94 @@ async function inkRecordAll() {
     rq.onerror = () => rej(rq.error);
   });
 }
-async function inkRecordPending() {
-  try { return (await inkRecordAll()).filter((row) => inkRecordVisibleToCurrentUser(row) && !row.uploaded && row.strokes); }
+async function inkRecordByQid(qid) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const store = db.transaction('inkrecords').objectStore('inkrecords');
+    const request = store.indexNames.contains('qid') ? store.index('qid').getAll(qid) : store.getAll();
+    request.onsuccess = () => {
+      const rows = Array.isArray(request.result) ? request.result : [];
+      res(rows.filter((row) => row && row.qid === qid));
+    };
+    request.onerror = () => rej(request.error);
+  });
+}
+async function inkRecordPending(limit = 80) {
+  try {
+    const db = await idbOpen();
+    const rows = await new Promise((res, rej) => {
+      const store = db.transaction('inkrecords').objectStore('inkrecords');
+      if (!store.indexNames.contains('upload_state')) {
+        const request = store.getAll();
+        request.onsuccess = () => res(Array.isArray(request.result) ? request.result : []);
+        request.onerror = () => rej(request.error);
+        return;
+      }
+      const out = [];
+      const request = store.index('upload_state').openCursor('pending');
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor || out.length >= Math.max(1, Number(limit) || 80)) { res(out); return; }
+        if (inkRecordVisibleToCurrentUser(cursor.value)) out.push(cursor.value);
+        cursor.continue();
+      };
+      request.onerror = () => rej(request.error);
+    });
+    return rows.filter((row) => inkRecordVisibleToCurrentUser(row) && !row.uploaded && row.strokes)
+      .sort((a, b) => Number(a.updatedAt || 0) - Number(b.updatedAt || 0))
+      .slice(0, Math.max(1, Number(limit) || 80));
+  }
   catch (_) { return []; }
+}
+async function inkRecordMarkUploaded(clientId, sentUpdatedAt, userId) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('inkrecords', 'readwrite');
+    const store = tx.objectStore('inkrecords');
+    const request = store.get(clientId);
+    let marked = false;
+    request.onsuccess = () => {
+      const current = request.result;
+      if (!current || Number(current.updatedAt || 0) > Number(sentUpdatedAt || 0)) return;
+      store.put({
+        ...current,
+        user_id: userId || current.user_id || null,
+        uploaded: true,
+        upload_state: 'uploaded',
+        uploadedAt: Date.now(),
+      });
+      marked = true;
+    };
+    request.onerror = () => rej(request.error);
+    tx.oncomplete = () => res(marked);
+    tx.onerror = () => rej(tx.error);
+    tx.onabort = () => rej(tx.error || new Error('筆跡同步狀態更新中止'));
+  });
 }
 async function inkRecordStats() {
   try {
-    const all = (await inkRecordAll()).filter(inkRecordVisibleToCurrentUser);
-    return { total: all.length, pending: all.filter((x) => !x.uploaded).length };
+    const db = await idbOpen();
+    const uid = syncState && syncState.user && syncState.user.id;
+    const total = await new Promise((res, rej) => {
+      const store = db.transaction('inkrecords').objectStore('inkrecords');
+      const request = uid && store.indexNames.contains('user_id') ? store.index('user_id').count(uid) : store.count();
+      request.onsuccess = () => res(Number(request.result) || 0);
+      request.onerror = () => rej(request.error);
+    });
+    const pending = await new Promise((res, rej) => {
+      const store = db.transaction('inkrecords').objectStore('inkrecords');
+      if (!store.indexNames.contains('upload_state')) { res(0); return; }
+      let count = 0;
+      const request = store.index('upload_state').openCursor('pending');
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) { res(count); return; }
+        if (inkRecordVisibleToCurrentUser(cursor.value)) count++;
+        cursor.continue();
+      };
+      request.onerror = () => rej(request.error);
+    });
+    return { total, pending };
   } catch (_) { return { total: 0, pending: 0 }; }
 }
 let inkLocalStatus = { total: 0, pending: 0 };
@@ -2941,6 +3038,13 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'hidden' || sessionMode !== 'paper-source' || !paperSourceSession) return;
   paperInkCommitCurrent();
   paperInkPersist(true);
+  paperRecoveryWrite(true);
+});
+document.addEventListener('freeze', () => {
+  if (sessionMode !== 'paper-source' || !paperSourceSession) return;
+  paperInkCommitCurrent();
+  paperInkPersist(true);
+  paperRecoveryWrite(true);
 });
 try { history.pushState({ guard: 1 }, ''); } catch (e) {}
 window.addEventListener('popstate', () => {
@@ -3997,6 +4101,81 @@ function paperRunLeft(run) {
   const base = Number.isFinite(Number(run.remainingMs)) ? Number(run.remainingMs) : MOCK_SPEC.minutes * 60000;
   return Math.max(0, base - (run.resumeAt ? Date.now() - Number(run.resumeAt) : 0));
 }
+const PAPER_RECOVERY_HEARTBEAT_MS = 5000;
+const PAPER_RECOVERY_STATE_MS = 20000;
+function paperRecoveryStorageKey(runId) {
+  return `${KEY}:paper-recovery:${String(runId || '').replace(/[^\w.-]/g, '_')}`;
+}
+function paperRecoveryRead(run) {
+  if (!run) return null;
+  let local = null;
+  try { local = JSON.parse(localStorage.getItem(paperRecoveryStorageKey(run.id)) || 'null'); } catch (_) {}
+  const state = run.paperRecovery && typeof run.paperRecovery === 'object' ? run.paperRecovery : null;
+  return [local, state]
+    .filter((item) => item && item.runId === run.id && !item.closed)
+    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0] || null;
+}
+function paperRecoveryApply(run) {
+  if (!run || run.status !== 'active') return null;
+  const recovery = paperRecoveryRead(run);
+  if (!recovery) {
+    // 舊版沒有心跳資料時，寧可保留最後一次已知剩餘時間，也不把當機後的離線時間算成考試時間。
+    run.resumeAt = null;
+    run.status = 'paused';
+    return null;
+  }
+  if (Number.isFinite(Number(recovery.remainingMs))) run.remainingMs = Math.max(0, Number(recovery.remainingMs));
+  if (Number.isFinite(Number(recovery.page))) run.paperPage = Math.max(0, Number(recovery.page));
+  run.resumeAt = null;
+  run.status = 'paused';
+  run.recoveredAt = Date.now();
+  run.recoveredFrom = Number(recovery.updatedAt) || null;
+  return recovery;
+}
+function paperRecoverySnapshot(session = paperSourceSession) {
+  if (!session || !session.run) return null;
+  const durability = session.durability || {};
+  return {
+    version: 1,
+    runId: session.run.id,
+    sourceId: session.source && session.source.id || session.run.sourceId,
+    page: Number(session.page) || 0,
+    remainingMs: paperRunLeft(session.run),
+    updatedAt: Date.now(),
+    lastLocalAt: Number(durability.localAt) || null,
+    lastCloudAt: Number(durability.cloudAt) || null,
+    pending: durability.pendingClientIds instanceof Set ? durability.pendingClientIds.size : 0,
+    closed: false,
+  };
+}
+function paperRecoveryWrite(forceState = false, session = paperSourceSession) {
+  const recovery = paperRecoverySnapshot(session);
+  if (!recovery) return null;
+  try { localStorage.setItem(paperRecoveryStorageKey(recovery.runId), JSON.stringify(recovery)); } catch (_) {}
+  session.recoveryHeartbeatAt = recovery.updatedAt;
+  session.run.paperRecovery = recovery;
+  if (forceState || recovery.updatedAt - Number(session.recoveryStateAt || 0) >= PAPER_RECOVERY_STATE_MS) {
+    session.recoveryStateAt = recovery.updatedAt;
+    session.run.mt = recovery.updatedAt;
+    save();
+  }
+  return recovery;
+}
+function paperRecoveryHeartbeat(now = Date.now()) {
+  if (!paperSourceSession || sessionMode !== 'paper-source') return null;
+  if (Number(now) - Number(paperSourceSession.recoveryHeartbeatAt || 0) < PAPER_RECOVERY_HEARTBEAT_MS) return null;
+  return paperRecoveryWrite(false);
+}
+function paperRecoveryClose(run, status) {
+  if (!run) return;
+  try { localStorage.removeItem(paperRecoveryStorageKey(run.id)); } catch (_) {}
+  run.paperRecovery = {
+    ...(run.paperRecovery && typeof run.paperRecovery === 'object' ? run.paperRecovery : {}),
+    version: 1, runId: run.id, sourceId: run.sourceId,
+    remainingMs: Number(run.remainingMs) || 0, page: Number(run.paperPage) || 0,
+    updatedAt: Date.now(), closed: true, status: status || run.status || 'closed',
+  };
+}
 function paperActiveRun(sourceId) {
   return (S.paperRuns || []).filter((run) => run && run.sourceId === sourceId && ['active', 'paused', 'grading'].includes(run.status))
     .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))[0] || null;
@@ -4036,6 +4215,7 @@ async function startPaperSource(sourceId) {
       paperLayoutVersion: PAPER_LAYOUT_VERSION };
     S.paperRuns = S.paperRuns || []; S.paperRuns.push(run); save();
   }
+  const recovered = paperRecoveryApply(run);
   if (run.paperLayoutVersion !== PAPER_LAYOUT_VERSION) {
     const legacyPage = Math.max(0, Number(run.paperPage) || 0);
     run.paperPage = legacyPage > 0 ? (legacyPage - 1) * 2 : 0;
@@ -4065,9 +4245,20 @@ async function startPaperSource(sourceId) {
       inkColor,
       inkUserId: syncState.user ? syncState.user.id : null,
       inkClientIds: Object.fromEntries(source.scans.map((_, page) => [page, paperInkClientFor(run, page)])),
+      journalPromises: new Set(),
+      journalRetry: new Map(),
+      durability: {
+        localAt: Number(paperInkLoadAll.lastMeta && paperInkLoadAll.lastMeta.localAt) || null,
+        cloudAt: Number(paperInkLoadAll.lastMeta && paperInkLoadAll.lastMeta.cloudAt) || null,
+        localError: false,
+        cloudError: false,
+        pendingClientIds: new Set(paperInkLoadAll.lastMeta && paperInkLoadAll.lastMeta.pendingClientIds || []),
+      },
+      recoveredNotice: recovered ? `已從 ${new Date(Number(recovered.updatedAt)).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })} 的安全點恢復` : '',
     };
     paperSourceSession.page = Math.max(0, Math.min(source.scans.length - 1, paperSourceSession.page));
     sessionActive = true; sessionMode = run.status === 'grading' ? 'paper-grade' : 'paper-source';
+    if (sessionMode === 'paper-source') paperRecoveryWrite(true);
     if (run.status === 'grading' || paperRunLeft(run) <= 0) paperSourceGrade(run.status === 'grading' ? '繼續今天的批分' : '時間到');
     else renderPaperSource();
   } catch (e) {
@@ -4095,6 +4286,10 @@ const PAPER_ZOOM_MAX = 4;
 const PAPER_CANVAS_MAX_PIXELS = 12000000;
 const PAPER_INK_GRID_SIZE = 40;
 const PAPER_INK_DEVICE_KEY = 'mathA13_paper_device_v1';
+const PAPER_INK_JOURNAL_MS = 650;
+const PAPER_INK_SNAPSHOT_MS = 60000;
+const PAPER_INK_CLOUD_MS = 900;
+const PAPER_INK_CLOUD_PAGE_SIZE = 1000;
 const PAPER_INK_WIDTH_MIN = .35;
 const PAPER_INK_WIDTH_MAX = 2;
 const PAPER_INK_COLORS = {
@@ -4151,24 +4346,48 @@ function paperInkRowUpdatedAt(row) {
   return Date.parse(row && (row.updated_at || row.created_at) || '')
     || Number(row && (row.updatedAt || row.t0) || 0);
 }
+async function paperInkCloudRows(runId) {
+  if (!supa || !syncState.user) return [];
+  const out = [];
+  let from = 0;
+  while (true) {
+    let query = supa.from('ink_sessions')
+      .select('client_id,qid,t0,proc,strokes,created_at,updated_at')
+      .like('qid', `paper:${runId}:%`);
+    const canPage = query && typeof query.range === 'function';
+    if (query && typeof query.order === 'function') query = query.order('updated_at', { ascending: true });
+    if (canPage) query = query.range(from, from + PAPER_INK_CLOUD_PAGE_SIZE - 1);
+    let { data, error } = await query;
+    if (error && /updated_at/i.test(String(error.message || ''))) {
+      query = supa.from('ink_sessions')
+        .select('client_id,qid,t0,proc,strokes,created_at')
+        .like('qid', `paper:${runId}:%`);
+      if (canPage && query && typeof query.range === 'function') query = query.range(from, from + PAPER_INK_CLOUD_PAGE_SIZE - 1);
+      ({ data, error } = await query);
+    }
+    if (error) throw error;
+    const rows = Array.isArray(data) ? data : [];
+    out.push(...rows);
+    if (!canPage || rows.length < PAPER_INK_CLOUD_PAGE_SIZE) break;
+    from += PAPER_INK_CLOUD_PAGE_SIZE;
+  }
+  return out;
+}
 async function paperInkLoadAll(run, source) {
   const pages = {};
+  const qids = source.scans.map((_, page) => paperInkQid(run, page));
   let local = [];
-  try { local = (await inkRecordAll()).filter(inkRecordVisibleToCurrentUser); } catch (_) {}
+  try {
+    const groups = await Promise.all(qids.map((qid) => inkRecordByQid(qid)));
+    local = groups.flat().filter(inkRecordVisibleToCurrentUser);
+  } catch (_) {}
   let cloud = [];
   if (supa && syncState.user) {
-    try {
-      let { data, error } = await supa.from('ink_sessions')
-        .select('client_id,qid,t0,proc,strokes,created_at,updated_at')
-        .like('qid', `paper:${run.id}:%`);
-      if (error && /updated_at/i.test(String(error.message || ''))) {
-        ({ data, error } = await supa.from('ink_sessions')
-          .select('client_id,qid,t0,proc,strokes,created_at')
-          .like('qid', `paper:${run.id}:%`));
-      }
-      if (!error && Array.isArray(data)) cloud = data;
-    } catch (_) {}
+    try { cloud = await paperInkCloudRows(run.id); } catch (_) {}
   }
+  const pendingClientIds = new Set(local.filter((row) => row && !row.uploaded).map((row) => row.client_id));
+  let localAt = local.reduce((max, row) => Math.max(max, Number(row && row.updatedAt) || 0), 0);
+  const cloudAt = cloud.reduce((max, row) => Math.max(max, paperInkRowUpdatedAt(row)), 0);
   for (let page = 0; page < source.scans.length; page++) {
     const qid = paperInkQid(run, page);
     const localRows = local.filter((row) => row && row.qid === qid)
@@ -4190,9 +4409,11 @@ async function paperInkLoadAll(run, source) {
     };
     const localClients = new Set(localRows.map((row) => row.client_id));
     for (const row of cloudRows) if (row && row.client_id && !localClients.has(row.client_id)) {
-      inkRecordPut({ ...row, user_id: syncState.user ? syncState.user.id : null, uploaded: true }).catch(() => {});
+      inkRecordPut({ ...row, user_id: syncState.user ? syncState.user.id : null, uploaded: true })
+        .then((stored) => { localAt = Math.max(localAt, Number(stored.updatedAt) || 0); }).catch(() => {});
     }
   }
+  paperInkLoadAll.lastMeta = { pendingClientIds: [...pendingClientIds], localAt, cloudAt };
   return pages;
 }
 function paperInkPage(page) {
@@ -4215,6 +4436,144 @@ function paperInkCloneStroke(stroke) {
       Number(point[2]) || .5,
     ]),
   };
+}
+function paperInkEventClientFor(run, pageIndex, kind, id) {
+  const safe = (value) => String(value || '').replace(/[^\w.-]/g, '_').slice(-96);
+  return `ink-paper-event-${safe(run && run.id)}-${Number(pageIndex) || 0}-${safe(paperInkDeviceId())}-${safe(kind)}-${safe(id)}`;
+}
+function paperInkStatusText(session = paperSourceSession) {
+  if (paperInkGestureIsTemporaryErase()) return 'S Pen 側鍵按住：暫時橡皮擦';
+  if (!session || !session.durability) return '筆跡自動保存';
+  const durability = session.durability;
+  if (durability.localError) return '本機保存失敗，正在重試；請勿關閉';
+  const pending = durability.pendingClientIds instanceof Set ? durability.pendingClientIds.size : 0;
+  if (pending) return typeof navigator !== 'undefined' && navigator.onLine === false
+    ? `已存在本機，等待網路（${pending}）`
+    : `已存在本機，雲端同步中（${pending}）`;
+  if (durability.cloudAt) return '本機與雲端已同步';
+  if (durability.localAt) return '已安全保存在本機';
+  return '啟用當機保護';
+}
+function paperInkStatusRender(session = paperSourceSession) {
+  const status = $('#paper-ink-status');
+  if (!status || !session || paperSourceSession !== session) return;
+  const durability = session.durability || {};
+  status.textContent = paperInkStatusText(session);
+  if (status.dataset) {
+    status.dataset.state = durability.localError ? 'error'
+      : durability.pendingClientIds instanceof Set && durability.pendingClientIds.size ? 'pending'
+        : durability.cloudAt ? 'synced' : 'local';
+  }
+}
+function paperInkCloudSchedule() {
+  if (paperInkCloudTimer != null) return;
+  paperInkCloudTimer = setTimeout(() => {
+    paperInkCloudTimer = null;
+    if (syncState.user) flushInkQueue();
+  }, PAPER_INK_CLOUD_MS);
+  if (paperInkCloudTimer && typeof paperInkCloudTimer.unref === 'function') paperInkCloudTimer.unref();
+}
+function paperInkLocalStored(record, session = paperSourceSession) {
+  if (!session || !session.durability || !record) return;
+  session.durability.localAt = Math.max(Number(session.durability.localAt) || 0, Number(record.updatedAt) || Date.now());
+  session.durability.localError = false;
+  if (!record.uploaded) session.durability.pendingClientIds.add(record.client_id);
+  paperInkStatusRender(session);
+  paperRecoveryWrite(false, session);
+  paperInkCloudSchedule();
+}
+function paperInkCloudStored(clientIds, at = Date.now(), session = paperSourceSession) {
+  if (!session || !session.durability) return;
+  for (const id of clientIds || []) session.durability.pendingClientIds.delete(id);
+  session.durability.cloudAt = Math.max(Number(session.durability.cloudAt) || 0, Number(at) || Date.now());
+  session.durability.cloudError = false;
+  paperInkStatusRender(session);
+}
+function paperInkJournalRetrySchedule(session = paperSourceSession) {
+  if (!session || session.journalRetryTimer || !(session.journalRetry instanceof Map) || !session.journalRetry.size) return;
+  session.journalRetryTimer = setTimeout(() => {
+    session.journalRetryTimer = null;
+    paperInkJournalRetryNow(session);
+  }, 1200);
+  if (session.journalRetryTimer && typeof session.journalRetryTimer.unref === 'function') session.journalRetryTimer.unref();
+}
+async function paperInkJournalRecord(record, session = paperSourceSession) {
+  if (!session || !record) return false;
+  try {
+    const stored = await inkRecordPut(record);
+    if (session.journalRetry instanceof Map) session.journalRetry.delete(record.client_id);
+    paperInkLocalStored(stored, session);
+    return true;
+  } catch (_) {
+    session.durability = session.durability || { pendingClientIds: new Set() };
+    session.durability.localError = true;
+    session.journalRetry = session.journalRetry instanceof Map ? session.journalRetry : new Map();
+    session.journalRetry.set(record.client_id, record);
+    statePersistErr = true;
+    paperInkStatusRender(session);
+    paperInkJournalRetrySchedule(session);
+    return false;
+  }
+}
+async function paperInkJournalRetryNow(session = paperSourceSession) {
+  if (!session || !(session.journalRetry instanceof Map) || !session.journalRetry.size) return true;
+  const records = [...session.journalRetry.values()];
+  const results = await Promise.all(records.map((record) => paperInkJournalRecord(record, session)));
+  if (session.journalRetry.size) paperInkJournalRetrySchedule(session);
+  return results.every(Boolean);
+}
+function paperInkTrackJournal(promise, session = paperSourceSession) {
+  if (!session) return promise;
+  session.journalPromises = session.journalPromises instanceof Set ? session.journalPromises : new Set();
+  session.journalPromises.add(promise);
+  promise.finally(() => session.journalPromises.delete(promise)).catch(() => {});
+  return promise;
+}
+function paperInkJournalStroke(stroke, final = false, session = paperSourceSession) {
+  if (!session || !session.run || !stroke || !Array.isArray(stroke.pts) || stroke.pts.length < 2) return Promise.resolve(false);
+  const pageIndex = Number(session.page) || 0;
+  if (!stroke._journalClientId) {
+    stroke._journalClientId = paperInkEventClientFor(session.run, pageIndex, 'stroke', paperInkStrokeId(stroke));
+  }
+  const captured = paperInkCloneStroke(stroke);
+  if (final) captured.t1 = Number(stroke.t1) || Date.now();
+  const record = {
+    client_id: stroke._journalClientId,
+    user_id: session.inkUserId || (syncState.user ? syncState.user.id : null),
+    qid: paperInkQid(session.run, pageIndex),
+    t0: Number(stroke.t0) || Date.now(),
+    proc: { overlay: true, mode: 'paper-source', page: pageIndex, event: 'stroke', draft: !final },
+    strokes: { paper: true, event: true, s: [captured], deleted: [] },
+    uploaded: false,
+  };
+  const previous = stroke._journalPromise || Promise.resolve();
+  const task = previous.catch(() => {}).then(() => paperInkJournalRecord(record, session));
+  stroke._journalPromise = task;
+  return paperInkTrackJournal(task, session);
+}
+function paperInkJournalDeleted(ids, session = paperSourceSession) {
+  const deleted = [...new Set((ids || []).filter(Boolean).map(String))];
+  if (!session || !session.run || !deleted.length) return Promise.resolve(false);
+  const pageIndex = Number(session.page) || 0;
+  const eventId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const record = {
+    client_id: paperInkEventClientFor(session.run, pageIndex, 'delete', eventId),
+    user_id: session.inkUserId || (syncState.user ? syncState.user.id : null),
+    qid: paperInkQid(session.run, pageIndex),
+    t0: Date.now(),
+    proc: { overlay: true, mode: 'paper-source', page: pageIndex, event: 'delete' },
+    strokes: { paper: true, event: true, s: [], deleted },
+    uploaded: false,
+  };
+  return paperInkTrackJournal(paperInkJournalRecord(record, session), session);
+}
+async function paperInkJournalDrain(session = paperSourceSession) {
+  if (!session) return true;
+  await paperInkJournalRetryNow(session);
+  const pending = session.journalPromises instanceof Set ? [...session.journalPromises] : [];
+  if (pending.length) await Promise.allSettled(pending);
+  if (session.journalRetry instanceof Map && session.journalRetry.size) await paperInkJournalRetryNow(session);
+  return !(session.journalRetry instanceof Map) || session.journalRetry.size === 0;
 }
 function paperInkCompact(data) {
   if (!data || !Array.isArray(data.s)) return [];
@@ -4281,22 +4640,19 @@ async function paperInkPersistPage(pageIndex, data, force, session = paperSource
     const request = inkRecordPut(record);
     data.persistPromise = request;
     try {
-      await request;
+      const stored = await request;
       wrote = true;
       data.persistedRevision = Math.max(Number(data.persistedRevision) || 0, revision);
       data.dirty = Number(data.revision) > revision;
       data.persistFailures = 0;
       statePersistErr = false;
-      clearTimeout(paperInkCloudTimer);
-      paperInkCloudTimer = setTimeout(() => { if (syncState.user) flushInkQueue(); }, 1400);
-      const status = $('#paper-ink-status');
-      if (status && paperSourceSession === session) status.textContent = paperInkGestureIsTemporaryErase() ? 'S Pen 側鍵按住：暫時橡皮擦' : '已保存';
+      paperInkLocalStored(stored, session);
     } catch (_) {
       data.dirty = true;
       data.persistFailures = (Number(data.persistFailures) || 0) + 1;
       statePersistErr = true;
-      const status = $('#paper-ink-status');
-      if (status && paperSourceSession === session) status.textContent = '保存失敗，正在自動重試；請先不要關閉頁面';
+      if (session.durability) session.durability.localError = true;
+      paperInkStatusRender(session);
       paperInkScheduleRetry(pageIndex, data, session);
       return false;
     } finally {
@@ -4325,12 +4681,11 @@ function paperInkPersist(force) {
     const timer = setTimeout(() => {
       if (paperInkSaveTimers.get(key) === timer) paperInkSaveTimers.delete(key);
       paperInkPersistPage(pageIndex, data, false, session);
-    }, 450);
+    }, PAPER_INK_SNAPSHOT_MS);
     paperInkSaveTimers.set(key, timer);
     if (timer && typeof timer.unref === 'function') timer.unref();
   }
-  const status = $('#paper-ink-status');
-  if (status) status.textContent = paperInkGestureIsTemporaryErase() ? 'S Pen 側鍵按住：暫時橡皮擦' : '保存中';
+  paperInkStatusRender(session);
   return Promise.resolve(true);
 }
 function paperInkMarkDirty() {
@@ -4342,9 +4697,9 @@ function paperInkMarkDirty() {
 function paperInkCheckpointCurrent(now) {
   if (!paperSourceSession || !paperSourceSession.inkCurrent || paperSourceSession.inkCurrent.pts.length < 2) return false;
   const at = Number(now) || Date.now();
-  if (at - Number(paperSourceSession.inkCheckpointAt || 0) < 900) return false;
+  if (at - Number(paperSourceSession.inkCheckpointAt || 0) < PAPER_INK_JOURNAL_MS) return false;
   paperSourceSession.inkCheckpointAt = at;
-  paperInkMarkDirty();
+  paperInkJournalStroke(paperSourceSession.inkCurrent, false);
   return true;
 }
 function paperInkLine(ctx, stroke, width, height) {
@@ -4629,8 +4984,10 @@ function paperInkEraseAt(e, cv) {
   if (!hit) return false;
   const bounds = paperInkStrokeBounds(hit);
   data.deleted = data.deleted instanceof Set ? data.deleted : new Set(data.deleted || []);
-  data.deleted.add(paperInkStrokeId(hit));
+  const deletedId = paperInkStrokeId(hit);
+  data.deleted.add(deletedId);
   hit.dead = Date.now();
+  paperInkJournalDeleted([deletedId]);
   paperInkMarkDirty();
   paperInkRedrawRegion(cv, data, bounds);
   return true;
@@ -4890,6 +5247,7 @@ function paperInkCommitCurrent() {
   paperSourceSession.inkCurrent = null;
   if (!stroke || stroke.pts.length <= 1) return false;
   stroke.t1 = Date.now();
+  paperInkJournalStroke(stroke, true);
   const data = paperInkPage(), index = data.s.length;
   data.s.push(stroke);
   if (data.spatial) paperInkSpatialAdd(data, stroke, index);
@@ -4901,7 +5259,7 @@ function paperInkModeRender(mode, temporaryErase = false) {
     const btn = $(`#paper-tool-${key}`); if (btn) btn.classList.toggle('active', key === mode);
   }
   const cv = $('#paper-ink-canvas'); if (cv) cv.dataset.mode = mode;
-  const status = $('#paper-ink-status'); if (status) status.textContent = temporaryErase ? 'S Pen 側鍵按住：暫時橡皮擦' : '筆跡自動保存';
+  paperInkStatusRender();
 }
 function paperInkModeSet(mode) {
   if (!paperSourceSession) return;
@@ -4946,19 +5304,25 @@ function paperInkUndo() {
   const stroke = [...data.s].reverse().find((item) => item && !item.dead); if (!stroke) return;
   const bounds = paperInkStrokeBounds(stroke);
   data.deleted = data.deleted instanceof Set ? data.deleted : new Set(data.deleted || []);
-  data.deleted.add(paperInkStrokeId(stroke));
+  const deletedId = paperInkStrokeId(stroke);
+  data.deleted.add(deletedId);
   stroke.dead = Date.now(); paperInkMarkDirty();
+  paperInkJournalDeleted([deletedId]);
   paperInkRedrawRegion($('#paper-ink-canvas'), data, bounds);
 }
 function paperInkClear() {
   const data = paperInkPage(); if (!data || !data.s.some((item) => item && !item.dead)) return;
   if (!confirm('清空這一頁題本上的全部筆跡？其他頁不受影響。')) return;
   const now = Date.now();
+  const deletedIds = [];
   data.deleted = data.deleted instanceof Set ? data.deleted : new Set(data.deleted || []);
   for (const stroke of data.s) if (stroke && !stroke.dead) {
-    data.deleted.add(paperInkStrokeId(stroke));
+    const deletedId = paperInkStrokeId(stroke);
+    data.deleted.add(deletedId);
+    deletedIds.push(deletedId);
     stroke.dead = now;
   }
+  paperInkJournalDeleted(deletedIds);
   paperInkMarkDirty(); paperInkPaint();
 }
 function paperWorkspacePage(delta) {
@@ -4970,7 +5334,9 @@ function paperWorkspacePage(delta) {
   const nextPage = Math.max(0, Math.min(paperSourceSession.source.scans.length - 1, paperSourceSession.page + delta));
   if (nextPage === paperSourceSession.page) return false;
   paperSourceSession.page = nextPage;
-  paperSourceSession.run.paperPage = paperSourceSession.page; paperSourceSession.run.mt = Date.now(); save(); renderPaperSource();
+  paperSourceSession.run.paperPage = paperSourceSession.page; paperSourceSession.run.mt = Date.now();
+  paperRecoveryWrite(true);
+  renderPaperSource();
   return true;
 }
 function paperWorkspaceZoom(delta) {
@@ -5325,34 +5691,111 @@ function paperNormalizeAiGrade(source, raw, model) {
     questions,
   };
 }
+function paperRecoveryTimeText(value) {
+  const at = Number(value) || 0;
+  return at ? new Date(at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '尚未';
+}
+async function paperRecoveryRows(session = paperSourceSession) {
+  if (!session || !session.run || !session.source) return [];
+  const groups = await Promise.all(session.source.scans.map((_, page) => inkRecordByQid(paperInkQid(session.run, page))));
+  return groups.flat().filter(inkRecordVisibleToCurrentUser);
+}
+async function paperRecoveryOpen() {
+  if (!paperSourceSession) return;
+  const session = paperSourceSession;
+  let rows = [];
+  try { rows = await paperRecoveryRows(session); } catch (_) {}
+  const pending = rows.filter((row) => row && !row.uploaded).length;
+  const journalRows = rows.filter((row) => row && row.proc && row.proc.event).length;
+  const durability = session.durability || {};
+  modal(`<h2>這一回的當機保護</h2>
+    <p class="dim">每一筆先寫進平板本機，再分批同步到私人 Supabase。整頁快照只做檢查點，不會隨筆跡增加而拖慢每一筆。</p>
+    ${session.recoveredNotice ? `<p class="good">${escH(session.recoveredNotice)}；當機後的離線時間沒有算進考試。</p>` : ''}
+    <div class="paper-recovery-grid">
+      <span>本機最後保存</span><b>${paperRecoveryTimeText(durability.localAt)}</b>
+      <span>雲端最後同步</span><b>${paperRecoveryTimeText(durability.cloudAt)}</b>
+      <span>待補傳</span><b>${pending} 筆</b>
+      <span>本回增量紀錄</span><b>${journalRows} 筆</b>
+      <span>救援識別碼</span><code>${escH(session.run.id)}</code>
+    </div>
+    <p class="dim">即使 Chrome 當機，重新開啟同一回會合併本機日誌、雲端日誌與最近快照，並回到最後保存的頁碼與時間。</p>`, [
+    ['關閉'],
+    ['匯出救援檔', () => paperRecoveryExport()],
+    ['立即同步', async () => {
+      paperInkCommitCurrent();
+      await paperInkJournalDrain(session);
+      await paperInkPersist(true);
+      await flushInkQueue();
+      paperInkStatusRender(session);
+    }, 'primary'],
+  ]);
+}
+async function paperRecoveryExport() {
+  if (!paperSourceSession) return false;
+  const session = paperSourceSession;
+  paperInkCommitCurrent();
+  const journalOk = await paperInkJournalDrain(session);
+  const snapshotOk = await paperInkPersist(true);
+  let records = [];
+  try { records = await paperRecoveryRows(session); } catch (_) {}
+  const recovery = paperRecoveryWrite(true, session);
+  const payload = {
+    kind: 'matha-paper-rescue-v1',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    appVersion: APP_VER,
+    run: {
+      id: session.run.id, sourceId: session.run.sourceId, name: session.run.name,
+      date: session.run.d, createdAt: session.run.createdAt,
+      page: Number(session.page) || 0, remainingMs: paperRunLeft(session.run),
+    },
+    source: { id: session.source.id, title: session.source.title, pages: session.source.scans.length },
+    recovery,
+    records,
+  };
+  const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `數A原卷救援-${session.run.d || today()}-${session.run.id}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  if (!journalOk || !snapshotOk) alert('救援檔已匯出，但本機資料庫仍有寫入失敗；請保留這個檔案並不要關閉頁面。');
+  return true;
+}
 function renderPaperSource() {
   if (!paperSourceSession) return renderMockIntro();
   if (paperSourceSession.readOnly) return renderPaperGradeResult();
   const { source, run, urls } = paperSourceSession;
   const left = paperRunLeft(run), page = paperSourceSession.page, scan = source.scans[page];
   app().innerHTML = `<div class="paper-session-shell">
-    <div class="paper-workbar"><div class="paper-work-title"><b>${escH(source.title)}</b><small>單指左右滑動翻頁</small></div>
+    <div class="paper-workbar"><div class="paper-work-title"><b>${escH(source.title)}</b><small>${paperSourceSession.recoveredNotice ? escH(paperSourceSession.recoveredNotice) : '單指左右滑動翻頁'}</small></div>
       <span id="paper-clock" class="timer paper-timer">${fmtClock(left)}</span>
-      <div class="paper-workgroup right"><button class="paper-icon-btn" onclick="paperWorkspaceZoom(-.25)" aria-label="縮小題本">−</button><span id="paper-zoom-label" class="paper-zoom-label">${Math.round(paperSourceSession.zoom * 100)}%</span><button class="paper-icon-btn" onclick="paperWorkspaceZoom(.25)" aria-label="放大題本">＋</button><span class="paper-page-label"><b>${page + 1} / ${source.scans.length}</b><small>${escH(scan.label)}</small></span><button class="paper-icon-btn" onclick="paperWorkspacePage(-1)" ${page <= 0 ? 'disabled' : ''} aria-label="上一頁">${uiIcon('arrow-left')}</button><button class="paper-icon-btn" onclick="paperWorkspacePage(1)" ${page >= source.scans.length - 1 ? 'disabled' : ''} aria-label="下一頁">${uiIcon('arrow-right')}</button><button class="paper-icon-btn" onclick="exitFlow()" aria-label="離開">${uiIcon('x')}</button></div></div>
+      <div class="paper-workgroup right"><button id="paper-ink-status" class="paper-save-status" data-state="local" onclick="paperRecoveryOpen()" aria-label="查看當機保護與救援">${escH(paperInkStatusText(paperSourceSession))}</button><button class="paper-icon-btn" onclick="paperWorkspaceZoom(-.25)" aria-label="縮小題本">−</button><span id="paper-zoom-label" class="paper-zoom-label">${Math.round(paperSourceSession.zoom * 100)}%</span><button class="paper-icon-btn" onclick="paperWorkspaceZoom(.25)" aria-label="放大題本">＋</button><span class="paper-page-label"><b>${page + 1} / ${source.scans.length}</b><small>${escH(scan.label)}</small></span><button class="paper-icon-btn" onclick="paperWorkspacePage(-1)" ${page <= 0 ? 'disabled' : ''} aria-label="上一頁">${uiIcon('arrow-left')}</button><button class="paper-icon-btn" onclick="paperWorkspacePage(1)" ${page >= source.scans.length - 1 ? 'disabled' : ''} aria-label="下一頁">${uiIcon('arrow-right')}</button><button class="paper-icon-btn" onclick="exitFlow()" aria-label="離開">${uiIcon('x')}</button></div></div>
     <div class="paper-workspace"><section class="paper-source-pane"><div class="paper-ink-tools"><button id="paper-tool-pen" onclick="paperInkModeSet('pen')">${uiIcon('pencil')}筆</button><button id="paper-tool-erase" onclick="paperInkModeSet('erase')">${uiIcon('erase')}橡皮擦</button><button onclick="paperInkUndo()">${uiIcon('undo')}復原</button><button onclick="paperInkClear()">${uiIcon('x')}清空本頁</button><div class="paper-color-group" role="group" aria-label="畫筆顏色"><button id="paper-color-black" class="paper-color-button" onclick="paperInkColorSet('black')" aria-label="黑色筆" aria-pressed="${paperSourceSession.inkColor === 'black'}"><i style="--ink:${PAPER_INK_COLORS.black}"></i><span>黑</span></button><button id="paper-color-blue" class="paper-color-button" onclick="paperInkColorSet('blue')" aria-label="藍色筆" aria-pressed="${paperSourceSession.inkColor === 'blue'}"><i style="--ink:${PAPER_INK_COLORS.blue}"></i><span>藍</span></button><button id="paper-color-green" class="paper-color-button" onclick="paperInkColorSet('green')" aria-label="綠色筆" aria-pressed="${paperSourceSession.inkColor === 'green'}"><i style="--ink:${PAPER_INK_COLORS.green}"></i><span>綠</span></button></div><label class="paper-pen-width" for="paper-pen-width"><span>筆粗 <b id="paper-pen-width-label">${Math.round(paperInkWidthValue(paperSourceSession.inkWidth) * 100)}%</b></span><input id="paper-pen-width" type="range" min="35" max="200" step="5" value="${Math.round(paperInkWidthValue(paperSourceSession.inkWidth) * 100)}" oninput="paperInkWidthSet(this.value)" aria-label="調整畫筆粗細"></label></div><div class="paper-page-viewport"><div class="paper-spread"><div id="paper-write-sheet" class="paper-write-sheet" data-side="${scan.side}"><div class="paper-question-crop"><img id="paper-source-image" src="${urls[page]}" alt="${escH(source.title)} ${escH(scan.label)}"></div><div class="paper-note-margin" aria-hidden="true"></div><canvas id="paper-ink-canvas" aria-label="整個畫面皆可直接書寫並左右滑動翻頁"></canvas><canvas id="paper-ai-canvas" aria-hidden="true"></canvas></div></div></div></section></div>
     <div class="paper-finish-bar"><span>${source.questions} 題・${source.minutes} 分鐘</span><button class="btn primary" onclick="paperSourceGrade('主動交卷')">交卷並第一次批改</button></div>
     <button id="paper-ui-toggle" class="paper-ui-toggle" onclick="paperUiToggle()" aria-label="收起工具" aria-pressed="false">${uiIcon('pencil')}<span>收起</span></button></div>`;
   sessionChrome(true);
   paperInkAttach();
+  paperInkStatusRender();
   startTicker(() => {
     if (!paperSourceSession || sessionMode !== 'paper-source') return stopTicker();
     const remain = paperRunLeft(run), clock = $('#paper-clock');
     if (clock) clock.textContent = fmtClock(remain);
+    paperRecoveryHeartbeat();
     if (remain <= 0) paperSourceGrade('時間到');
   });
 }
-function paperSourcePause() {
+async function paperSourcePause() {
   if (!paperSourceSession) return Promise.resolve(false);
-  const run = paperSourceSession.run;
+  const session = paperSourceSession, run = session.run;
+  const remaining = paperRunLeft(run);
   paperInkCommitCurrent();
-  const persisted = paperInkPersist(true);
-  run.remainingMs = paperRunLeft(run); run.resumeAt = null; run.status = 'paused'; run.mt = Date.now(); save();
-  return persisted;
+  run.remainingMs = remaining; run.resumeAt = null; run.status = 'paused'; run.mt = Date.now();
+  run.paperPage = Number(session.page) || 0;
+  paperRecoveryClose(run, 'paused');
+  save();
+  const [journalOk, persisted] = await Promise.all([paperInkJournalDrain(session), paperInkPersist(true)]);
+  return !!journalOk && (!!persisted || !paperInkPage() || !paperInkPage().dirty);
 }
 function paperSourceDiscard(runId) {
   const run = (S.paperRuns || []).find((item) => item && item.id === runId);
@@ -5363,6 +5806,7 @@ function paperSourceDiscard(runId) {
     run.gradeDraft = null;
     run.discardedAt = now;
     run.mt = now;
+    paperRecoveryClose(run, 'discarded');
   }
   S.extMocks = (S.extMocks || []).filter((row) => row && row.paperRunId !== runId);
   save();
@@ -5462,15 +5906,18 @@ async function paperSourceGrade(reason) {
   stopTicker();
   const session = paperSourceSession, { source, run } = session;
   session.grading = true;
+  const remaining = paperRunLeft(run);
   paperInkCommitCurrent();
-  const saved = await paperInkPersist(true);
-  if (!saved && paperInkPage() && paperInkPage().dirty) {
+  const [journalOk, saved] = await Promise.all([paperInkJournalDrain(session), paperInkPersist(true)]);
+  if (!journalOk || (!saved && paperInkPage() && paperInkPage().dirty)) {
     session.grading = false;
     renderPaperSource();
     alert('最後一筆尚未安全保存，已取消交卷。請保持頁面開啟，等右上顯示「已保存」後再交卷。');
     return;
   }
-  run.remainingMs = paperRunLeft(run); run.resumeAt = null; run.status = 'grading'; run.gradeReason = reason; run.mt = Date.now(); save();
+  run.remainingMs = remaining; run.resumeAt = null; run.status = 'grading'; run.gradeReason = reason; run.mt = Date.now();
+  paperRecoveryClose(run, 'grading');
+  save();
   sessionMode = 'paper-grade';
   paperSourceGradeLoading(source, reason, `正在整理第 1 / ${source.scans.length} 頁…`);
   try {
@@ -7070,13 +7517,16 @@ function mergeState(a, b) {
   return merged;
 }
 let inkFlushBusy = false;
+let inkFlushRetryTimer = null;
 async function flushInkQueue() {
-  if (!supa || !syncState.user || inkFlushBusy) return;
+  if (!supa || !syncState.user || inkFlushBusy) return false;
   inkFlushBusy = true;
+  let shouldContinue = false;
+  let uploadedAny = false;
   try {
-    const pending = await inkRecordPending();
-    for (const local of pending) {
-      const row = {
+    const pending = await inkRecordPending(80);
+    if (pending.length) {
+      const rows = pending.map((local) => ({
         client_id: local.client_id,
         user_id: syncState.user.id,
         qid: local.qid,
@@ -7084,14 +7534,25 @@ async function flushInkQueue() {
         proc: local.proc || null,
         strokes: local.strokes,
         updated_at: new Date(Number(local.updatedAt) || Date.now()).toISOString(),
-      };
-      const { error } = await supa.from('ink_sessions').upsert(row, { onConflict: 'user_id,client_id' });
+      }));
+      const { error } = await supa.from('ink_sessions').upsert(rows, { onConflict: 'user_id,client_id' });
       if (error) {
         syncState.msg = '筆跡已保存在本機，雲端補傳尚未成功';
         syncState.pushErr = true;
-        break;
+        if (paperSourceSession && paperSourceSession.durability) {
+          paperSourceSession.durability.cloudError = true;
+          paperInkStatusRender();
+        }
+      } else {
+        const markedIds = [];
+        for (const local of pending) {
+          if (await inkRecordMarkUploaded(local.client_id, local.updatedAt, syncState.user.id)) markedIds.push(local.client_id);
+        }
+        uploadedAny = markedIds.length > 0;
+        paperInkCloudStored(markedIds);
+        syncState.pushErr = false;
+        shouldContinue = pending.length >= 80;
       }
-      await inkRecordPut({ ...local, user_id: syncState.user.id, uploaded: true, uploadedAt: Date.now() });
     }
   } catch (_) {
     syncState.msg = '筆跡已保存在本機，連線後會自動補傳';
@@ -7100,7 +7561,17 @@ async function flushInkQueue() {
     inkFlushBusy = false;
     await refreshInkLocalStatus();
     syncPill();
+    if (inkLocalStatus.pending > 0 && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
+      clearTimeout(inkFlushRetryTimer);
+      inkFlushRetryTimer = setTimeout(() => {
+        inkFlushRetryTimer = null;
+        flushInkQueue();
+      }, syncState.pushErr ? 5000 : 250);
+      if (inkFlushRetryTimer && typeof inkFlushRetryTimer.unref === 'function') inkFlushRetryTimer.unref();
+    }
   }
+  if (shouldContinue && !inkFlushRetryTimer) setTimeout(() => flushInkQueue(), 0);
+  return uploadedAny;
 }
 function syncInk(qid, t0, proc) {
   const st = sessionInk[qid]; if (!st) return;

@@ -12,6 +12,7 @@ test('schema 提供 app_state revision CAS 與筆跡 client_id 冪等索引', ()
   assert.match(schema, /alter table public\.app_state add column if not exists revision/i);
   assert.match(schema, /client_id\s+text/i);
   assert.match(schema, /unique index if not exists ink_sessions_user_client[\s\S]*\(user_id, client_id\)/i);
+  assert.match(schema, /index if not exists ink_sessions_user_qid_updated[\s\S]*\(user_id, qid, updated_at desc\)/i);
 });
 
 test('原版模考 bucket 保持私有且只有核准帳號能讀取', () => {
@@ -24,12 +25,16 @@ test('原版模考 bucket 保持私有且只有核准帳號能讀取', () => {
 
 test('本機 IndexedDB 同時保存狀態與未上傳原始筆跡', () => {
   const source = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
-  assert.match(source, /indexedDB\.open\('mathA13Content', 4\)/);
+  assert.match(source, /indexedDB\.open\('mathA13Content', 5\)/);
   assert.match(source, /createObjectStore\('state'\)/);
   assert.match(source, /`current:\$\{KEY\}`/);
   assert.match(source, /createObjectStore\('inkrecords'/);
+  assert.match(source, /createIndex\('qid', 'qid'/);
+  assert.match(source, /createIndex\('upload_state', 'upload_state'/);
+  assert.match(source, /createIndex\('user_id', 'user_id'/);
   assert.match(source, /inkRecordPut\(\{[\s\S]*uploaded: false/);
-  assert.match(source, /upsert\(row, \{ onConflict: 'user_id,client_id' \}\)/);
+  assert.match(source, /upsert\(rows, \{ onConflict: 'user_id,client_id' \}\)/);
+  assert.match(source, /Number\(current\.updatedAt \|\| 0\) > Number\(sentUpdatedAt \|\| 0\)/);
 });
 
 test('同一瀏覽器切換帳號時，作答狀態使用不同命名空間且可各自取回', async () => {

@@ -95,6 +95,10 @@ create policy "own ink" on public.ink_sessions
 
 create index if not exists ink_sessions_user_time
   on public.ink_sessions (user_id, created_at desc);
+-- 原卷採「低頻整頁快照 + 每筆/刪除增量事件」。依使用者、原卷頁面與更新時間載入，
+-- 避免一整回累積數千筆後退化成全表掃描。
+create index if not exists ink_sessions_user_qid_updated
+  on public.ink_sessions (user_id, qid, updated_at desc);
 
 -- ── 老師方法庫：42 堂課逐字稿蒸餾出的 1662 條方法（概念洞 UI 用） ──
 -- 建表後資料由專案擁有者以本機工具灌入（來源 teacher-methodlib.json 屬私人內容，工具與資料皆不進公開 repo）
