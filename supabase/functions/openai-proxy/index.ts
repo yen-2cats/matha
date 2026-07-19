@@ -301,7 +301,7 @@ Deno.serve(async (req: Request) => {
         body: JSON.stringify(requestBody),
       });
     } catch (error) {
-      await refundAiBudget(userId, responseType); // 沒打到 OpenAI（逾時/網路）＝退還額度
+      await refundAiBudget(userId, responseType, budgetDate); // 沒打到 OpenAI（逾時/網路）＝退還額度
       throw error;
     } finally {
       clearTimeout(timeout);
@@ -312,7 +312,7 @@ Deno.serve(async (req: Request) => {
       unknown
     >;
     if (!openAiResponse.ok) {
-      await refundAiBudget(userId, responseType);
+      await refundAiBudget(userId, responseType, budgetDate);
       const apiError = response.error as Record<string, unknown> | undefined;
       return reply(origin, openAiResponse.status, {
         message: String(
@@ -321,7 +321,7 @@ Deno.serve(async (req: Request) => {
       });
     }
     if (response.status !== "completed") {
-      await refundAiBudget(userId, responseType);
+      await refundAiBudget(userId, responseType, budgetDate);
       const incomplete = response.incomplete_details as
         | Record<string, unknown>
         | undefined;
@@ -330,9 +330,15 @@ Deno.serve(async (req: Request) => {
           (incomplete?.reason ? `：${incomplete.reason}` : ""),
       });
     }
-    const text = outputText(response);
+    let text: string;
+    try {
+      text = outputText(response); // refusal 會丟錯：一樣沒拿到結果，要退款再往外拋
+    } catch (error) {
+      await refundAiBudget(userId, responseType, budgetDate);
+      throw error;
+    }
     if (!text) {
-      await refundAiBudget(userId, responseType);
+      await refundAiBudget(userId, responseType, budgetDate);
       return reply(origin, 502, { message: "OpenAI 沒有回傳文字" });
     }
     await recordAiUsage(
@@ -350,6 +356,7 @@ Deno.serve(async (req: Request) => {
       try {
         return reply(origin, 200, { ...common, json: JSON.parse(text) });
       } catch (_) {
+        await refundAiBudget(userId, responseType, budgetDate); // 拿不到可用結果就退，與其他 5xx 路徑一致
         return reply(origin, 502, {
           message: "OpenAI 回傳的結構化資料無法解析",
         });

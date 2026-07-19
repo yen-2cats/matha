@@ -273,12 +273,15 @@ $$;
 revoke all on function public.claim_ai_request(uuid, text, integer) from public;
 grant execute on function public.claim_ai_request(uuid, text, integer) to service_role;
 
--- OpenAI 呼叫失敗（逾時/HTTP 錯誤/沒回文字）時由 proxy 退還額度：
+-- OpenAI 呼叫失敗（逾時/HTTP 錯誤/拒絕/沒回文字）時由 proxy 退還額度：
 -- 否則整卷批改（權重 12）逾時幾次就燒光一天額度卻沒拿到結果。
--- 只退當天的列、地板為 0；last_request_at 不動（4 秒連點限制照舊）。
+-- p_usage_date＝claim 回傳的 date：80 秒逾時可能跨台北午夜，要退回「扣額那天」的列，
+-- 不能退「退款當下」的列（新日列可能不存在→無聲 no-op，或退錯天）。地板為 0；last_request_at 不動。
+drop function if exists public.refund_ai_request(uuid, integer);
 create or replace function public.refund_ai_request(
   p_user_id uuid,
-  p_weight integer
+  p_weight integer,
+  p_usage_date date default null
 )
 returns void
 language sql
@@ -290,10 +293,10 @@ as $$
       request_weight = greatest(request_weight - greatest(1, least(coalesce(p_weight, 1), 20)), 0),
       updated_at = now()
   where user_id = p_user_id
-    and usage_date = (timezone('Asia/Taipei', now()))::date;
+    and usage_date = coalesce(p_usage_date, (timezone('Asia/Taipei', now()))::date);
 $$;
-revoke all on function public.refund_ai_request(uuid, integer) from public;
-grant execute on function public.refund_ai_request(uuid, integer) to service_role;
+revoke all on function public.refund_ai_request(uuid, integer, date) from public;
+grant execute on function public.refund_ai_request(uuid, integer, date) to service_role;
 
 -- 簽名改了（加 p_usage_date）：先移除舊 3 參數版本，避免留下兩個 overload
 drop function if exists public.record_ai_usage(uuid, bigint, bigint);

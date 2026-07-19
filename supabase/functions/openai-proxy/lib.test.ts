@@ -35,9 +35,15 @@ Deno.test("splitCsv 去空白、去空項", () => {
   assertEquals(splitCsv(undefined).size, 0);
 });
 
-Deno.test("整卷批改權重最高，未知類型走預設 1", () => {
+Deno.test("整卷批改權重最高；未知類型無權重（index.ts 呼叫端以 || 1 補預設）", () => {
   assert(requestWeights.paper_grade === 12);
   assert(requestWeights.paper_detail === 5);
+  for (const weight of Object.values(requestWeights)) {
+    assert(
+      Number.isInteger(weight) && weight >= 1 && weight <= 20,
+      "權重須落在 claim_ai_request 的 1–20 夾擠範圍",
+    );
+  }
   assertEquals(requestWeights["nonsense"], undefined);
 });
 
@@ -193,12 +199,23 @@ Deno.test("safetyIdentifier 穩定且不含原始 user id", async () => {
   assert(!a.includes("user-123"));
 });
 
-Deno.test("結構化 schema 全部 strict：不許 schema 外欄位、整卷必含 finalAnswer", () => {
-  for (const schema of Object.values(responseSchemas)) {
-    assertEquals(
-      (schema as { additionalProperties: boolean }).additionalProperties,
-      false,
-    );
+Deno.test("結構化 schema 每一層物件都關閉額外欄位，整卷必含 finalAnswer", () => {
+  // 遞迴檢查：任何巢狀層（markSchema、stuckSchema、paper_grade 題目物件…）漏設
+  // additionalProperties:false 都會讓 strict json_schema 部署失敗或放行雜欄位
+  const walk = (node: unknown, path: string) => {
+    if (!node || typeof node !== "object") return;
+    const obj = node as Record<string, unknown>;
+    if (obj.type === "object" && obj.properties) {
+      assertEquals(obj.additionalProperties, false);
+      assert(Array.isArray(obj.required), `${path} 缺 required`);
+      for (const [key, child] of Object.entries(obj.properties)) {
+        walk(child, `${path}.${key}`);
+      }
+    }
+    if (obj.type === "array") walk(obj.items, `${path}[]`);
+  };
+  for (const [name, schema] of Object.entries(responseSchemas)) {
+    walk(schema, name);
   }
   const paper = responseSchemas.paper_grade.properties.questions.items;
   assert(paper.required.includes("finalAnswer"));
