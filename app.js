@@ -2,7 +2,7 @@
    設計原則：每一題都帶碼表、每一個錯都分類、用數據決定練什麼。 */
 'use strict';
 
-const APP_VER = '0722a'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版。改版時 index.html ?v= 與 sw.js APP_STAMP 要同步（tests/assets.test.js 會驗）
+const APP_VER = '0722b'; // 版本戳：顯示在做題畫面右上，用來確認裝置載到的是不是最新版。改版時 index.html ?v= 與 sw.js APP_STAMP 要同步（tests/assets.test.js 會驗）
 
 /* ═══════════ 狀態 ═══════════ */
 const LEGACY_KEY = 'mathA13';
@@ -6527,8 +6527,8 @@ function renderCorrections() {
     const dueNow = String(run.due || '') <= today();
     return `<div class="card paper-key-wait"><span class="eyebrow">原版紙本卷｜${dueNow ? '已到訂正日' : '尚未到期'}</span><h2>${escH(run.name || '原版模考')}｜${run.d}</h2>
       <p><b>${run.score}/100</b>｜錯題 ${Array.isArray(run.wrongNos) && run.wrongNos.length ? run.wrongNos.join('、') : '無'}。</p>
-      <div class="notice"><b>${dueNow ? '今天重新做一次；仍然卡住才開第二次 AI 詳批。' : `第二次 AI 詳批鎖到 ${run.due}。`}</b><p>${dueNow ? '先留下重新計算或破題方向。第一次簡批沒有分析步驟；只有你重試後仍不會，AI 才找第一個錯誤並給完整詳解。' : '第一次批改已標出對錯、分數與正確答案；今天不分析錯誤步驟，也不看詳解。'}</p></div>
-      <div class="actr"><button class="btn" onclick="openPaperGradeResult('${jsA(run.id)}')">查看第一次紅筆卷／輸出 PDF</button><button class="btn" onclick="renderPaperTeacherReport('${jsA(run.id)}')">給老師看逐題紀錄</button>${dueNow ? `<button class="btn primary" onclick="startPaperAnswerReview('${jsA(run.id)}')">開始原卷盲訂正</button>` : ''}</div>
+      <div class="notice"><b>${dueNow ? '今天直接在第一次紅筆卷上重新做；仍然卡住才開第二次 AI 詳批。' : `第二次 AI 詳批鎖到 ${run.due}。`}</b><p>${dueNow ? '卷面只提示最終答案；請在原題與留白處寫下完整重算或破題方向。重新批改後仍不成立，才會開放第一個錯誤與完整詳解。' : '第一次批改已標出對錯、分數與正確答案；今天不分析錯誤步驟，也不看詳解。'}</p></div>
+      <div class="actr"><button class="btn" onclick="openPaperGradeResult('${jsA(run.id)}')">查看第一次紅筆卷／輸出 PDF</button><button class="btn" onclick="renderPaperTeacherReport('${jsA(run.id)}')">給老師看逐題紀錄</button>${dueNow ? `<button class="btn primary" onclick="startPaperAnswerReview('${jsA(run.id)}')">在紅筆卷上開始訂正</button>` : ''}</div>
     </div>`;
   }).join('');
   const sourceCompleted = (S.paperRuns || []).filter((run) => run && run.status === 'completed' && run.aiGrade)
